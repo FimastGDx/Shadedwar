@@ -1,6 +1,7 @@
 package com.fullfud.fullfud.common.entity;
 
 import com.fullfud.fullfud.common.entity.drone.DronePhysics;
+import com.fullfud.fullfud.common.entity.drone.FpvDroneConfig;
 import com.fullfud.fullfud.common.entity.drone.DronePreset;
 import com.fullfud.fullfud.common.item.FpvConfiguratorItem;
 import com.fullfud.fullfud.common.item.FpvControllerItem;
@@ -143,6 +144,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     private static final String TAG_SIGNAL_RANGE_SCALE = "SignalRangeScale";
     private static final String TAG_SIGNAL_PENETRATION_SCALE = "SignalPenetrationScale";
     private static final String TAG_PRESET = "Preset";
+    private static final String TAG_CONFIG = "DroneConfig";
 
     private final AnimatableInstanceCache animationCache = GeckoLibUtil.createInstanceCache(this);
     private final Quaternionf qRotation = new Quaternionf();
@@ -157,6 +159,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     private boolean physicsInitialized = false;
 
     private DronePreset dronePreset = DronePreset.STANDARD_STRIKE;
+    private FpvDroneConfig droneConfig = FpvDroneConfig.fromPreset(DronePreset.STANDARD_STRIKE);
     private final DronePhysics dronePhysics = new DronePhysics();
 
     private float targetThrottle;
@@ -224,16 +227,34 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         this.noPhysics = false;
         this.setNoGravity(true);
         this.refreshDimensions();
-        this.dronePhysics.applyPreset(this.dronePreset);
+        refreshPhysicsConfiguration();
     }
 
     public void setDronePreset(DronePreset preset) {
         this.dronePreset = preset;
-        this.dronePhysics.applyPreset(preset);
+        refreshPhysicsConfiguration();
     }
 
     public DronePreset getDronePreset() {
         return this.dronePreset;
+    }
+
+    public FpvDroneConfig getDroneConfig() {
+        return droneConfig.copy();
+    }
+
+    public void setDroneConfig(final FpvDroneConfig config) {
+        this.droneConfig = config == null ? FpvDroneConfig.fromPreset(dronePreset) : config.copy();
+        refreshPhysicsConfiguration();
+    }
+
+    public boolean canAccessPlayer(final Player player) {
+        return canAccess(player);
+    }
+
+    private void refreshPhysicsConfiguration() {
+        this.dronePhysics.applyPreset(this.dronePreset);
+        this.dronePhysics.applyConfig(this.droneConfig);
     }
 
     @Override
@@ -287,6 +308,11 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         if (tag.contains(TAG_PRESET)) {
             setDronePreset(DronePreset.fromOrdinal(tag.getInt(TAG_PRESET)));
         }
+        if (tag.contains(TAG_CONFIG, Tag.TAG_COMPOUND)) {
+            setDroneConfig(FpvDroneConfig.fromTag(tag.getCompound(TAG_CONFIG)));
+        } else {
+            setDroneConfig(FpvDroneConfig.fromPreset(getDronePreset()));
+        }
         setArmed(tag.getBoolean(TAG_ARMED));
         targetThrottle = tag.getFloat(TAG_THRUST);
         throttleOutput = targetThrottle;
@@ -332,6 +358,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     @Override
     protected void addAdditionalSaveData(final CompoundTag tag) {
         tag.putInt(TAG_PRESET, dronePreset.ordinal());
+        tag.put(TAG_CONFIG, droneConfig.save());
         tag.putBoolean(TAG_ARMED, isArmed());
         tag.putFloat(TAG_THRUST, targetThrottle);
         tag.putDouble(TAG_ROLL, droneRoll);
@@ -760,7 +787,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             yInput,
             mousePitchDelta,
             mouseRollDelta,
-            getDronePreset().flightMode3d
+            dronePhysics.isFlightMode3d()
         );
         inputMousePitchDelta = 0.0F;
         inputMouseRollDelta = 0.0F;
@@ -858,7 +885,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             if (player instanceof ServerPlayer serverPlayer) {
                 FullfudNetwork.getChannel().send(
                     PacketDistributor.PLAYER.with(() -> serverPlayer),
-                    new OpenFpvConfiguratorPacket(getUUID())
+                    new OpenFpvConfiguratorPacket(getUUID(), droneConfig.save())
                 );
             }
             return InteractionResult.sidedSuccess(level().isClientSide());
@@ -1093,6 +1120,15 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         if (!Float.isFinite(packet.pitchInput())
             || !Float.isFinite(packet.rollInput())
             || !Float.isFinite(packet.yawInput())
+            || !Float.isFinite(packet.rollRate())
+            || !Float.isFinite(packet.rollSuper())
+            || !Float.isFinite(packet.rollExpo())
+            || !Float.isFinite(packet.pitchRate())
+            || !Float.isFinite(packet.pitchSuper())
+            || !Float.isFinite(packet.pitchExpo())
+            || !Float.isFinite(packet.yawRate())
+            || !Float.isFinite(packet.yawSuper())
+            || !Float.isFinite(packet.yawExpo())
             || !Float.isFinite(packet.mousePitchDelta())
             || !Float.isFinite(packet.mouseRollDelta())
             || !Float.isFinite(packet.throttle())) {
@@ -1102,6 +1138,17 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         inputPitch = Mth.clamp(packet.pitchInput(), -1.0F, 1.0F);
         inputRoll = Mth.clamp(packet.rollInput(), -1.0F, 1.0F);
         inputYaw = Mth.clamp(packet.yawInput(), -1.0F, 1.0F);
+        dronePhysics.setControlRates(
+            droneConfig.getRcRate(FpvDroneConfig.CHANNEL_ROLL),
+            droneConfig.getSuperRate(FpvDroneConfig.CHANNEL_ROLL),
+            droneConfig.getExpo(FpvDroneConfig.CHANNEL_ROLL),
+            droneConfig.getRcRate(FpvDroneConfig.CHANNEL_PITCH),
+            droneConfig.getSuperRate(FpvDroneConfig.CHANNEL_PITCH),
+            droneConfig.getExpo(FpvDroneConfig.CHANNEL_PITCH),
+            droneConfig.getRcRate(FpvDroneConfig.CHANNEL_YAW),
+            droneConfig.getSuperRate(FpvDroneConfig.CHANNEL_YAW),
+            droneConfig.getExpo(FpvDroneConfig.CHANNEL_YAW)
+        );
         inputMousePitchDelta = Mth.clamp(packet.mousePitchDelta(), -0.5F, 0.5F);
         inputMouseRollDelta = Mth.clamp(packet.mouseRollDelta(), -0.5F, 0.5F);
         targetThrottle = Mth.clamp(packet.throttle(), 0.0F, 1.0F);
@@ -1146,20 +1193,10 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     }
 
     public void requestRelease(final ServerPlayer sender) {
-        if (sender == null || sender.isShiftKeyDown()) {
+        if (!isController(sender)) {
             return;
         }
-        if (!isController(sender)) {
-            final CompoundTag root = sender.getPersistentData();
-            if (!root.contains(PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
-                return;
-            }
-            final CompoundTag tag = root.getCompound(PLAYER_REMOTE_TAG);
-            if (!tag.hasUUID(PLAYER_TAG_DRONE) || !getUUID().equals(tag.getUUID(PLAYER_TAG_DRONE))) {
-                return;
-            }
-            forceRestoreFromPersistentData(sender, tag);
-            clearRemoteTag(sender);
+        if (sender.isShiftKeyDown()) {
             return;
         }
         endRemoteControl(sender);
@@ -1174,28 +1211,21 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     }
 
     public boolean beginControl(final ServerPlayer player) {
+        if (entityData.get(DATA_CONTROLLER).isPresent() && !isController(player)) {
+            return false;
+        }
         if (owner != null && !owner.equals(player.getUUID())) {
             return false;
         }
         if (owner == null) {
             owner = player.getUUID();
         }
-        if (isController(player) && session != null) {
-            controlTimeoutTicks = CONTROL_TIMEOUT_TICKS;
-            syncRemoteActiveState();
-            if (!isRemoteStateValidFor(player)) {
-                writeRemoteTag(player);
+        final CompoundTag root = player.getPersistentData();
+        if (root.contains(PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
+            final CompoundTag tag = root.getCompound(PLAYER_REMOTE_TAG);
+            if (!tag.hasUUID(PLAYER_TAG_DRONE) || !getUUID().equals(tag.getUUID(PLAYER_TAG_DRONE))) {
+                forceReleaseFromPersistentData(player.getServer(), player.getUUID(), tag);
             }
-            syncViewCenter(player);
-            return true;
-        }
-        sanitizeExistingRemoteState(player);
-        final UUID controllerId = entityData.get(DATA_CONTROLLER).orElse(null);
-        if (controllerId != null && !controllerId.equals(player.getUUID()) && resolvePlayer(controllerId) == null) {
-            endRemoteControl(null);
-        }
-        if (entityData.get(DATA_CONTROLLER).isPresent() && !isController(player)) {
-            return false;
         }
         if (!isWithinPlayerChunkRange(player)) {
             player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.fullfud.fpv.out_of_range"), true);
@@ -1296,13 +1326,9 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             return;
         }
         final ChunkPos chunkPos = this.chunkPosition();
-        final boolean centerChanged = lastSentViewCenter == null || !lastSentViewCenter.equals(chunkPos);
-        if (centerChanged) {
+        if (lastSentViewCenter == null || !lastSentViewCenter.equals(chunkPos)) {
             player.connection.send(new ClientboundSetChunkCacheCenterPacket(chunkPos.x, chunkPos.z));
             lastSentViewCenter = chunkPos;
-        }
-        if (centerChanged || (tickCount % 20 == 0)) {
-            com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkTracking(player);
         }
     }
 
@@ -1313,8 +1339,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         final ChunkPos chunkPos = player.chunkPosition();
         player.connection.send(new ClientboundSetChunkCacheCenterPacket(chunkPos.x, chunkPos.z));
         lastSentViewCenter = null;
-        com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkTracking(player);
-        com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkRefresh(player);
     }
 
     private void syncRemoteController(final ServerPlayer player) {
@@ -1343,21 +1367,17 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     }
 
     private void restoreRemoteController(final ServerPlayer player, final ControlSession controlSession) {
-        if (player == null) {
+        if (player == null || controlSession == null) {
             return;
         }
-        if (controlSession == null) {
-            final CompoundTag root = player.getPersistentData();
-            if (root.contains(PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
-                restorePlayerFromRemoteTag(player, root.getCompound(PLAYER_REMOTE_TAG));
-            } else {
-                restoreRemotePlayerState(player);
-                resetViewCenter(player);
-                publishRemotePlayerState(player);
-            }
-            return;
-        }
-        restoreRemotePlayerState(player);
+        clearViewPoint(player);
+        RemotePlayerProtection.clear(player);
+        player.setInvisible(false);
+        player.setSilent(false);
+        player.setNoGravity(false);
+        player.noPhysics = false;
+        syncRemotePlayerVisibility(player, false);
+        syncRemotePlayerEquipment(player, false);
         final MinecraftServer server = player.getServer();
         final ServerLevel targetLevel = server != null ? server.getLevel(controlSession.dimension()) : player.serverLevel();
         if (targetLevel != null) {
@@ -1368,7 +1388,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             player.fallDistance = 0.0F;
         }
         resetViewCenter(player);
-        publishRemotePlayerState(player);
     }
 
     private static void restorePlayerFromRemoteTag(final ServerPlayer player, final CompoundTag tag) {
@@ -1377,7 +1396,13 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         }
 
         clearViewPoint(player);
-        restoreRemotePlayerState(player);
+        RemotePlayerProtection.clear(player);
+        player.setInvisible(false);
+        player.setSilent(false);
+        player.setNoGravity(false);
+        player.noPhysics = false;
+        syncRemotePlayerVisibility(player, false);
+        syncRemotePlayerEquipment(player, false);
         if (player.getServer() != null && tag.contains(PLAYER_TAG_ORIGIN_DIM, Tag.TAG_STRING)) {
             final ResourceLocation dimensionId = ResourceLocation.tryParse(tag.getString(PLAYER_TAG_ORIGIN_DIM));
             final ServerLevel targetLevel = dimensionId != null ? player.getServer().getLevel(ResourceKey.create(Registries.DIMENSION, dimensionId)) : null;
@@ -1395,22 +1420,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         }
         final ChunkPos chunkPos = player.chunkPosition();
         player.connection.send(new ClientboundSetChunkCacheCenterPacket(chunkPos.x, chunkPos.z));
-        com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkTracking(player);
-        com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkRefresh(player);
-        publishRemotePlayerState(player);
-    }
-
-    private static void restoreRemotePlayerState(final ServerPlayer player) {
-        if (player == null) {
-            return;
-        }
-        clearViewPoint(player);
-        RemotePlayerProtection.clear(player);
-        player.setInvisible(false);
-        player.setSilent(false);
-        player.setNoGravity(false);
-        player.noPhysics = false;
-        player.hurtMarked = true;
     }
 
     private static void syncRemotePlayerVisibility(final ServerPlayer player, final boolean hidden) {
@@ -1424,7 +1433,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             if (hidden) {
                 viewer.connection.send(new ClientboundRemoveEntitiesPacket(player.getId()));
             } else {
-                viewer.connection.send(new ClientboundRemoveEntitiesPacket(player.getId()));
                 viewer.connection.send(player.getAddEntityPacket());
             }
         }
@@ -1497,14 +1505,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         for (final ServerLevel level : server.getAllLevels()) {
             final Entity entity = level.getEntity(droneId);
             if (entity instanceof FpvDroneEntity drone) {
-                if (playerId.equals(drone.getControllerId())) {
-                    drone.forceReleaseControlFor(playerId);
-                } else if (drone.session != null) {
-                    final UUID controllerId = drone.getControllerId();
-                    if (controllerId == null || drone.resolvePlayer(controllerId) == null) {
-                        drone.endRemoteControl(null);
-                    }
-                }
+                drone.forceReleaseControlFor(playerId);
                 return;
             }
         }
@@ -1576,40 +1577,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         }
         writeRemoteTag(sender);
         return true;
-    }
-
-    private void sanitizeExistingRemoteState(final ServerPlayer player) {
-        if (player == null) {
-            return;
-        }
-        final CompoundTag root = player.getPersistentData();
-        if (!root.contains(PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
-            return;
-        }
-        final CompoundTag tag = root.getCompound(PLAYER_REMOTE_TAG);
-        if (!tag.hasUUID(PLAYER_TAG_DRONE)) {
-            clearRemoteTag(player);
-            return;
-        }
-        forceRestoreFromPersistentData(player, tag);
-        clearRemoteTag(player);
-    }
-
-    private static void publishRemotePlayerState(final ServerPlayer player) {
-        if (player == null || !(player.level() instanceof ServerLevel serverLevel)) {
-            return;
-        }
-        syncRemotePlayerVisibility(player, false);
-        syncRemotePlayerEquipment(player, false);
-        com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkTracking(player);
-        com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkRefresh(player);
-        for (final ServerPlayer viewer : serverLevel.players()) {
-            if (viewer == player) {
-                continue;
-            }
-            com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkTracking(viewer);
-            com.fullfud.fullfud.core.RemoteControlFailsafe.forceChunkRefresh(viewer);
-        }
     }
 
     public boolean isArmed() {

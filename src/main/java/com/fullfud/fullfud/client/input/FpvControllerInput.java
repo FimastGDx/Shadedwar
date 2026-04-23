@@ -161,18 +161,8 @@ public final class FpvControllerInput {
         }
         lastJid = jid;
 
-        final boolean allowSingleControllerCalibration = calibration != null
-            && calibration.isReady()
-            && connectedControllers == 1;
-        if (calibration != null
-            && calibration.isReady()
-            && (calibration.isReadyForController(controllerName) || allowSingleControllerCalibration)) {
+        if (calibration != null && calibration.isReady()) {
             return pollCalibratedRawJoystick(jid, calibration, connectedControllers);
-        }
-
-        final boolean preferGamepad = FullfudClientConfig.CLIENT.fpvControllerPreferGamepadMapping.get();
-        if (preferGamepad && GLFW.glfwJoystickIsGamepad(jid) && GLFW.glfwGetGamepadState(jid, GAMEPAD_STATE)) {
-            return pollGamepad(jid, GAMEPAD_STATE, connectedControllers);
         }
         return pollRawJoystick(jid, connectedControllers);
     }

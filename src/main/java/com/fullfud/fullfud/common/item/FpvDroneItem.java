@@ -1,6 +1,7 @@
 package com.fullfud.fullfud.common.item;
 
 import com.fullfud.fullfud.common.entity.FpvDroneEntity;
+import com.fullfud.fullfud.common.entity.drone.FpvDroneConfig;
 import com.fullfud.fullfud.common.entity.drone.DronePreset;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import net.minecraft.core.BlockPos;
@@ -46,6 +47,7 @@ public class FpvDroneItem extends Item {
         final Direction facing = context.getHorizontalDirection();
         drone.moveTo(spawnPos.getX() + 0.5D, spawnPos.getY() + 0.05D, spawnPos.getZ() + 0.5D, facing.toYRot(), 0.0F);
         drone.setDronePreset(preset);
+        drone.setDroneConfig(FpvDroneConfig.fromPreset(preset));
         drone.setSignalScales(signalRangeScale, signalPenetrationScale);
         serverLevel.addFreshEntity(drone);
         if (context.getPlayer() instanceof ServerPlayer serverPlayer) {

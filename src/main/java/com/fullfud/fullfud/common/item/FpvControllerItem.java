@@ -53,10 +53,8 @@ public class FpvControllerItem extends Item implements GeoItem {
             player.displayClientMessage(Component.translatable("message.fullfud.fpv.drone_missing"), true);
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
         }
-        if (drone.beginControl(serverPlayer)) {
-            return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
-        }
-        return InteractionResultHolder.fail(stack);
+        drone.beginControl(serverPlayer);
+        return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
     }
 
     public void link(final ItemStack stack, final FpvDroneEntity drone, final Player player) {

@@ -356,7 +356,13 @@ public final class ShahedClientHandler {
             final double distance = dronePos.distanceTo(playerPos);
             final double maxDistance = FullfudClientConfig.CLIENT.shahedSoundMaxDistance.get();
             final float dopplerPitch = DroneSoundEffects.computeDopplerPitch(dronePos, droneVelocity, playerPos);
-            final float gainHF = DroneSoundEffects.computeCombinedGainHF(distance, dronePos.y, playerPos.y, maxDistance);
+            final float gainHF = DroneSoundEffects.computeCombinedGainHF(
+                distance,
+                dronePos.y,
+                playerPos.y,
+                maxDistance,
+                DroneSoundEffects.SoundProfile.SHAHED
+            );
             ensureEngine(minecraft, maxDistance);
             if (engine != null) {
                 engine.update(
@@ -391,7 +397,11 @@ public final class ShahedClientHandler {
             if (engine != null && !engine.isStopped()) {
                 return;
             }
-            engine = new ShahedEngineLoopSoundInstance(FullfudRegistries.SHAHED_ENGINE_LOOP.get(), maxDistance);
+            engine = new ShahedEngineLoopSoundInstance(
+                FullfudRegistries.SHAHED_ENGINE_LOOP.get(),
+                maxDistance,
+                DroneSoundEffects.SoundProfile.SHAHED
+            );
             minecraft.getSoundManager().play(engine);
         }
 
@@ -426,7 +436,11 @@ public final class ShahedClientHandler {
             if (dive != null && !dive.isStopped()) {
                 return;
             }
-            dive = new ShahedDiveLoopSoundInstance(FullfudRegistries.SHAHED_ENGINE_DIVE.get(), maxDistance);
+            dive = new ShahedDiveLoopSoundInstance(
+                FullfudRegistries.SHAHED_ENGINE_DIVE.get(),
+                maxDistance,
+                DroneSoundEffects.SoundProfile.SHAHED
+            );
             minecraft.getSoundManager().play(dive);
         }
 
@@ -452,7 +466,13 @@ public final class ShahedClientHandler {
             final double distance = extrapolatedPos.distanceTo(playerPos);
             final double maxDistance = FullfudClientConfig.CLIENT.shahedSoundMaxDistance.get();
             final float dopplerPitch = DroneSoundEffects.computeDopplerPitch(extrapolatedPos, lastDroneVelocity, playerPos);
-            final float gainHF = DroneSoundEffects.computeCombinedGainHF(distance, extrapolatedPos.y, playerPos.y, maxDistance);
+            final float gainHF = DroneSoundEffects.computeCombinedGainHF(
+                distance,
+                extrapolatedPos.y,
+                playerPos.y,
+                maxDistance,
+                DroneSoundEffects.SoundProfile.SHAHED
+            );
             if (engine != null && !engine.isStopped()) {
                 engine.extrapolate(extrapolatedPos.x, extrapolatedPos.y, extrapolatedPos.z, dopplerPitch, gainHF, nowTick);
             }

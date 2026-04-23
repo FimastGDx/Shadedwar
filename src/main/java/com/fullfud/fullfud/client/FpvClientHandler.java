@@ -8,6 +8,7 @@ import com.fullfud.fullfud.client.input.FpvControllerInput;
 import com.fullfud.fullfud.client.screen.ControllerCalibrationScreen;
 import com.fullfud.fullfud.client.screen.FpvConfiguratorScreen;
 import com.fullfud.fullfud.common.entity.FpvDroneEntity;
+import com.fullfud.fullfud.common.entity.drone.FpvDroneConfig;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import com.fullfud.fullfud.core.config.FullfudClientConfig;
 import com.fullfud.fullfud.core.network.FullfudNetwork;
@@ -92,7 +93,6 @@ public final class FpvClientHandler {
 
     private static final ResourceLocation SHADER_LOC = new ResourceLocation("fullfud", "shaders/post/fpv_post.json");
     private static final float KEYBOARD_THROTTLE_MAX = 0.65F;
-
     private static UUID activeDrone;
     private static FpvDroneEntity cachedResolvedDrone;
     private static long cachedResolvedDroneGameTime = Long.MIN_VALUE;
@@ -159,12 +159,12 @@ public final class FpvClientHandler {
         modEventBus.addListener(FpvClientHandler::onRegisterKeyMappings);
     }
 
-    public static void openConfigurator(final UUID droneId) {
+    public static void openConfigurator(final UUID droneId, final FpvDroneConfig config) {
         final Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null) {
             return;
         }
-        minecraft.setScreen(new FpvConfiguratorScreen(droneId));
+        minecraft.setScreen(new FpvConfiguratorScreen(droneId, config));
     }
 
     public static void onClientSetup(final FMLClientSetupEvent event) {
@@ -200,7 +200,11 @@ public final class FpvClientHandler {
         final Minecraft minecraft = Minecraft.getInstance();
         if (minecraft.level == null || minecraft.player == null) {
             if (event.phase != TickEvent.Phase.END) return;
-            resetState();
+            if (inFpvMode) {
+                inFpvMode = false;
+                destroyFpvChain();
+            }
+            restoreFov();
             return;
         }
 
@@ -381,9 +385,7 @@ public final class FpvClientHandler {
 
         distanceToPilot = Math.sqrt(drone.distanceToSqr(minecraft.player));
 
-        // Inverted pitch on keyboard: W/S swapped.
         final float keyPitch = axis(minecraft.options.keyDown.isDown(), minecraft.options.keyUp.isDown());
-        // A/D now controls yaw (left/right turn) instead of roll.
         final float keyYawFromMovement = axis(minecraft.options.keyRight.isDown(), minecraft.options.keyLeft.isDown());
 
         float pitchInput = keyPitch;
@@ -411,7 +413,6 @@ public final class FpvClientHandler {
         }
 
         if (jumpDown) {
-            // Always allow immediate keyboard throttle burst on Space.
             throttleDemand = KEYBOARD_THROTTLE_MAX;
             throttleDisplayMax = KEYBOARD_THROTTLE_MAX;
         } else if (controllerActive && controllerState.hasThrottle()) {
@@ -420,7 +421,6 @@ public final class FpvClientHandler {
             throttleDemand = Mth.lerp(a, throttleDemand, Mth.clamp(controllerState.throttle(), 0.0F, 1.0F));
             throttleDisplayMax = 1.0F;
         } else {
-            // fpvdrone intentionally avoids an unrestricted keyboard throttle path.
             throttleDemand = 0.0F;
             throttleDisplayMax = KEYBOARD_THROTTLE_MAX;
         }
@@ -439,6 +439,15 @@ public final class FpvClientHandler {
             pitchInput,
             rollInput,
             yawInput,
+            controllerCalibration.getRcRate(ControllerCalibration.AXIS_ROLL),
+            controllerCalibration.getSuperRate(ControllerCalibration.AXIS_ROLL),
+            controllerCalibration.getExpo(ControllerCalibration.AXIS_ROLL),
+            controllerCalibration.getRcRate(ControllerCalibration.AXIS_PITCH),
+            controllerCalibration.getSuperRate(ControllerCalibration.AXIS_PITCH),
+            controllerCalibration.getExpo(ControllerCalibration.AXIS_PITCH),
+            controllerCalibration.getRcRate(ControllerCalibration.AXIS_YAW),
+            controllerCalibration.getSuperRate(ControllerCalibration.AXIS_YAW),
+            controllerCalibration.getExpo(ControllerCalibration.AXIS_YAW),
             mousePitchDelta,
             mouseRollDelta,
             throttleDemand,
@@ -1289,9 +1298,12 @@ public final class FpvClientHandler {
             return false;
         }
         final UUID controller = drone.getControllerId();
-        return controller != null
-            && controller.equals(minecraft.player.getUUID())
-            && drone.isRemoteControlActiveSynced();
+        if (controller == null || !controller.equals(minecraft.player.getUUID())) {
+            return false;
+        }
+        return drone.isRemoteControlActiveSynced()
+            || minecraft.getCameraEntity() == drone
+            || (activeDrone != null && activeDrone.equals(drone.getUUID()));
     }
 
     private static void invalidateResolvedDroneCache() {
@@ -1428,16 +1440,6 @@ public final class FpvClientHandler {
         }
         minecraft.player.setInvisible(localPlayerInvisible);
         minecraft.player.setSilent(localPlayerSilent);
-        final UUID ownerId = minecraft.player.getUUID();
-        if (minecraft.level != null) {
-            for (final Entity entity : minecraft.level.entitiesForRendering()) {
-                if (entity == null || entity == minecraft.player || !ownerId.equals(entity.getUUID())) {
-                    continue;
-                }
-                entity.setInvisible(localPlayerInvisible);
-                entity.setSilent(localPlayerSilent);
-            }
-        }
         localPlayerStateCaptured = false;
     }
 }

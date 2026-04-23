@@ -6,6 +6,7 @@ import com.fullfud.fullfud.core.network.packet.FpvReleasePacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioLoopPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioOneShotPacket;
 import com.fullfud.fullfud.core.network.packet.OpenFpvConfiguratorPacket;
+import com.fullfud.fullfud.core.network.packet.UpdateFpvDroneConfigPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedControlPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedGhostUpdatePacket;
 import com.fullfud.fullfud.core.network.packet.ShahedLinkPacket;
@@ -15,7 +16,7 @@ import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public final class FullfudNetwork {
-    private static final String PROTOCOL_VERSION = "2";
+    private static final String PROTOCOL_VERSION = "4";
     private static SimpleChannel channel;
     private static int packetId = 0;
 
@@ -52,6 +53,7 @@ public final class FullfudNetwork {
         channel.registerMessage(nextId(), FpvControlPacket.class, FpvControlPacket::encode, FpvControlPacket::decode, FpvControlPacket::handle);
         channel.registerMessage(nextId(), FpvReleasePacket.class, FpvReleasePacket::encode, FpvReleasePacket::decode, FpvReleasePacket::handle);
         channel.registerMessage(nextId(), OpenFpvConfiguratorPacket.class, OpenFpvConfiguratorPacket::encode, OpenFpvConfiguratorPacket::decode, OpenFpvConfiguratorPacket::handle);
+        channel.registerMessage(nextId(), UpdateFpvDroneConfigPacket.class, UpdateFpvDroneConfigPacket::encode, UpdateFpvDroneConfigPacket::decode, UpdateFpvDroneConfigPacket::handle);
         channel.registerMessage(nextId(), DroneAudioLoopPacket.class, DroneAudioLoopPacket::encode, DroneAudioLoopPacket::decode, DroneAudioLoopPacket::handle);
         channel.registerMessage(nextId(), DroneAudioOneShotPacket.class, DroneAudioOneShotPacket::encode, DroneAudioOneShotPacket::decode, DroneAudioOneShotPacket::handle);
     }

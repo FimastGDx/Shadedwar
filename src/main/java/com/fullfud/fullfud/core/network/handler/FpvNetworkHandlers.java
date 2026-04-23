@@ -2,9 +2,11 @@ package com.fullfud.fullfud.core.network.handler;
 
 import com.fullfud.fullfud.client.FpvClientHandler;
 import com.fullfud.fullfud.common.entity.FpvDroneEntity;
+import com.fullfud.fullfud.common.entity.drone.FpvDroneConfig;
 import com.fullfud.fullfud.core.network.packet.FpvControlPacket;
 import com.fullfud.fullfud.core.network.packet.FpvReleasePacket;
 import com.fullfud.fullfud.core.network.packet.OpenFpvConfiguratorPacket;
+import com.fullfud.fullfud.core.network.packet.UpdateFpvDroneConfigPacket;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraftforge.api.distmarker.Dist;
@@ -43,6 +45,23 @@ public final class FpvNetworkHandlers {
     }
 
     public static void handleOpenConfigurator(final OpenFpvConfiguratorPacket packet) {
-        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> FpvClientHandler.openConfigurator(packet.droneId()));
+        DistExecutor.unsafeRunWhenOn(
+            Dist.CLIENT,
+            () -> () -> FpvClientHandler.openConfigurator(packet.droneId(), FpvDroneConfig.fromTag(packet.configTag()))
+        );
+    }
+
+    public static void handleUpdateConfigurator(final UpdateFpvDroneConfigPacket packet, final ServerPlayer sender) {
+        if (sender == null) {
+            return;
+        }
+        final ServerLevel level = sender.serverLevel();
+        if (level == null) {
+            return;
+        }
+        final var entity = level.getEntity(packet.droneId());
+        if (entity instanceof FpvDroneEntity drone && drone.canAccessPlayer(sender)) {
+            drone.setDroneConfig(FpvDroneConfig.fromTag(packet.configTag()));
+        }
     }
 }

@@ -461,11 +461,7 @@ public class PlayerDecoyEntity extends LivingEntity {
             return false;
         }
         final CompoundTag root = owner.getPersistentData();
-        if (root.contains(FpvDroneEntity.PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)
-            && FpvDroneEntity.isRemoteControlActive(owner.getServer(), owner.getUUID(), root.getCompound(FpvDroneEntity.PLAYER_REMOTE_TAG))) {
-            return true;
-        }
-        return root.contains(ShahedDroneEntity.PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)
-            && ShahedDroneEntity.isRemoteControlActive(owner.getServer(), owner.getUUID(), root.getCompound(ShahedDroneEntity.PLAYER_REMOTE_TAG));
+        return root.contains(FpvDroneEntity.PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)
+            || root.contains(ShahedDroneEntity.PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND);
     }
 }

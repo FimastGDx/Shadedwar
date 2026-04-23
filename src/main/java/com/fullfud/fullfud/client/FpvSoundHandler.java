@@ -85,7 +85,7 @@ public final class FpvSoundHandler {
                 return;
             }
             final SoundEvent sound = FullfudRegistries.FPV_ENGINE_LOOP.get();
-            engine = new DroneEngineLoopSoundInstance(sound, maxDistance);
+            engine = new DroneEngineLoopSoundInstance(sound, maxDistance, DroneSoundEffects.SoundProfile.FPV);
             minecraft.getSoundManager().play(engine);
         }
 
@@ -155,7 +155,13 @@ public final class FpvSoundHandler {
             final double distance = dronePos.distanceTo(playerPos);
             final double maxDistance = FullfudClientConfig.CLIENT.fpvSoundMaxDistance.get();
             final float dopplerPitch = DroneSoundEffects.computeDopplerPitch(dronePos, droneVelocity, playerPos);
-            final float gainHF = DroneSoundEffects.computeCombinedGainHF(distance, dronePos.y, playerPos.y, maxDistance);
+            final float gainHF = DroneSoundEffects.computeCombinedGainHF(
+                distance,
+                dronePos.y,
+                playerPos.y,
+                maxDistance,
+                DroneSoundEffects.SoundProfile.FPV
+            );
             ensureEngine(minecraft, maxDistance);
             if (engine != null) {
                 engine.update(dronePos.x, dronePos.y, dronePos.z, powerMix, speedFactor, dopplerPitch, gainHF, nowTick);
@@ -198,7 +204,13 @@ public final class FpvSoundHandler {
             final double distance = extrapolatedPos.distanceTo(playerPos);
             final double maxDistance = FullfudClientConfig.CLIENT.fpvSoundMaxDistance.get();
             final float dopplerPitch = DroneSoundEffects.computeDopplerPitch(extrapolatedPos, lastDroneVelocity, playerPos);
-            final float gainHF = DroneSoundEffects.computeCombinedGainHF(distance, extrapolatedPos.y, playerPos.y, maxDistance);
+            final float gainHF = DroneSoundEffects.computeCombinedGainHF(
+                distance,
+                extrapolatedPos.y,
+                playerPos.y,
+                maxDistance,
+                DroneSoundEffects.SoundProfile.FPV
+            );
             if (engine != null && !engine.isStopped()) {
                 engine.extrapolate(extrapolatedPos.x, extrapolatedPos.y, extrapolatedPos.z, dopplerPitch, gainHF, nowTick);
             }

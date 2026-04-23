@@ -2,7 +2,6 @@ package com.fullfud.fullfud.client.screen;
 
 import com.fullfud.fullfud.client.input.FpvControllerInput;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
@@ -27,9 +26,8 @@ public class ControllerSelectScreen extends Screen {
         final int buttonWidth = 300;
         int y = 36;
         if (controllers.isEmpty()) {
-            addRenderableWidget(Button.builder(Component.translatable("screen.fullfud.calibration.controller.none"), button -> { })
-                .bounds(width / 2 - buttonWidth / 2, y, buttonWidth, 20)
-                .build()).active = false;
+            final FpvHudButton button = addRenderableWidget(new FpvHudButton(width / 2 - buttonWidth / 2, y, buttonWidth, 20, Component.translatable("screen.fullfud.calibration.controller.none"), () -> { }));
+            button.active = false;
             y += 26;
         } else {
             final String selectedName = parentScreen.getSelectedControllerName();
@@ -39,16 +37,13 @@ public class ControllerSelectScreen extends Screen {
                         + controller.name()
                         + " [" + controller.axisCount() + "/" + controller.buttonCount() + "]"
                 );
-                addRenderableWidget(Button.builder(label, button -> choose(controller))
-                    .bounds(width / 2 - buttonWidth / 2, y, buttonWidth, 20)
-                    .build());
+                final FpvHudButton button = addRenderableWidget(new FpvHudButton(width / 2 - buttonWidth / 2, y, buttonWidth, 20, label, () -> choose(controller)));
+                button.setSelected(controller.name().equalsIgnoreCase(selectedName));
                 y += 24;
             }
         }
 
-        addRenderableWidget(Button.builder(Component.translatable("screen.fullfud.calibration.cancel"), button -> onClose())
-            .bounds(width / 2 - 75, height - 28, 150, 20)
-            .build());
+        addRenderableWidget(new FpvHudButton(width / 2 - 75, height - 28, 150, 20, Component.translatable("screen.fullfud.calibration.cancel"), this::onClose));
     }
 
     private void choose(final FpvControllerInput.ConnectedController controller) {
@@ -60,9 +55,10 @@ public class ControllerSelectScreen extends Screen {
 
     @Override
     public void render(final GuiGraphics graphics, final int mouseX, final int mouseY, final float partialTick) {
-        renderBackground(graphics);
+        FpvHudUi.renderBackdrop(graphics, width, height);
         super.render(graphics, mouseX, mouseY, partialTick);
-        graphics.drawCenteredString(font, title, width / 2, 16, 0xFFFFFF);
+        FpvHudUi.renderPanel(graphics, width / 2 - 162, 12, 324, Math.max(70, 52 + controllers.size() * 24));
+        graphics.drawCenteredString(font, title, width / 2, 16, FpvHudUi.TEXT);
     }
 
     @Override

@@ -3,75 +3,81 @@ package com.fullfud.fullfud.common.entity.drone;
 public enum DronePreset {
     STANDARD_STRIKE(
         "7 Inch 6S",
-        1300.0f,
+        1350.0f,
         28.0f,
-        6.5f,
-        6,
-        1800,
         7.0f,
-        3.5f,
+        6,
+        2200,
+        7.0f,
+        4.0f,
         2,
-        801.3937f,
+        920.0f,
         35.0f,
-        40.0f,
-        300.0f,
-        14.0f,
-        20.0f,
+        38.0f,
+        320.0f,
+        17.0f,
+        18.0f,
         6.0f,
-        20.0f,
+        18.0f,
         1.15f, 0.67f, 0.0f,
         1.15f, 0.67f, 0.0f,
         1.15f, 0.67f, 0.0f,
+        1.0f,
+        1.08f,
         1.0f,
         false,
         false
     ),
     TINY_WHOOP(
-        "Tiny Whoop",
-        13000.0f,
+        "65mm Whoop 1S",
+        22000.0f,
         8.0f,
-        2.5f,
+        2.0f,
         1,
-        450,
-        1.5f,
-        1.5f,
-        4,
-        103.6263f,
-        25.0f,
-        25.0f,
-        25.0f,
-        8.0f,
-        5.0f,
-        5.0f,
-        17.0f,
-        1.15f, 0.67f, 0.0f,
-        1.15f, 0.67f, 0.0f,
-        1.15f, 0.67f, 0.0f,
+        300,
         1.25f,
+        1.3f,
+        4,
+        27.5f,
+        65.0f,
+        20.0f,
+        65.0f,
+        3.5f,
+        2.0f,
+        1.2f,
+        8.0f,
+        1.15f, 0.67f, 0.0f,
+        1.15f, 0.67f, 0.0f,
+        1.15f, 0.67f, 0.0f,
+        1.0f,
+        1.35f,
+        0.95f,
         false,
         false
     ),
     STRIKE_7INCH(
         "7 Inch 6S Strike",
-        1300.0f,
+        1250.0f,
         28.0f,
-        6.5f,
+        8.0f,
         6,
-        1800,
+        4000,
         7.0f,
-        3.5f,
+        4.0f,
         2,
-        1800.0f,
+        1650.0f,
         35.0f,
-        40.0f,
-        300.0f,
-        14.0f,
+        45.0f,
+        340.0f,
+        17.0f,
         20.0f,
         6.0f,
-        20.0f,
+        22.0f,
         1.15f, 0.67f, 0.0f,
         1.15f, 0.67f, 0.0f,
         1.15f, 0.67f, 0.0f,
+        0.98f,
+        1.16f,
         1.0f,
         true,
         false
@@ -104,6 +110,8 @@ public enum DronePreset {
     public final float yawSuper;
     public final float yawExpo;
     public final float motorCommandScale;
+    public final float dragCoefficient;
+    public final float thrustMultiplier;
     public final boolean explodesOnDestroy;
     public final boolean flightMode3d;
 
@@ -135,6 +143,8 @@ public enum DronePreset {
         final float yawSuper,
         final float yawExpo,
         final float motorCommandScale,
+        final float dragCoefficient,
+        final float thrustMultiplier,
         final boolean explodesOnDestroy,
         final boolean flightMode3d
     ) {
@@ -165,6 +175,8 @@ public enum DronePreset {
         this.yawSuper = yawSuper;
         this.yawExpo = yawExpo;
         this.motorCommandScale = motorCommandScale;
+        this.dragCoefficient = dragCoefficient;
+        this.thrustMultiplier = thrustMultiplier;
         this.explodesOnDestroy = explodesOnDestroy;
         this.flightMode3d = flightMode3d;
     }

@@ -57,6 +57,8 @@ public class DronePhysics {
     private float yawSuper;
     private float yawExpo;
     private float motorCommandScale;
+    private float dragCoefficientSetting;
+    private float thrustMultiplier;
     private boolean flightMode3d;
 
     private float massKg;
@@ -117,9 +119,55 @@ public class DronePhysics {
         this.yawSuper = preset.yawSuper;
         this.yawExpo = preset.yawExpo;
         this.motorCommandScale = preset.motorCommandScale;
+        this.dragCoefficientSetting = preset.dragCoefficient;
+        this.thrustMultiplier = preset.thrustMultiplier;
         this.flightMode3d = preset.flightMode3d;
         recalculateDerived();
         reset();
+    }
+
+    public void applyConfig(final FpvDroneConfig config) {
+        if (config == null) {
+            return;
+        }
+        this.rollRateSetting = clampRate(config.getRcRate(FpvDroneConfig.CHANNEL_ROLL));
+        this.rollSuper = clampUnit(config.getSuperRate(FpvDroneConfig.CHANNEL_ROLL));
+        this.rollExpo = clampUnit(config.getExpo(FpvDroneConfig.CHANNEL_ROLL));
+        this.pitchRateSetting = clampRate(config.getRcRate(FpvDroneConfig.CHANNEL_PITCH));
+        this.pitchSuper = clampUnit(config.getSuperRate(FpvDroneConfig.CHANNEL_PITCH));
+        this.pitchExpo = clampUnit(config.getExpo(FpvDroneConfig.CHANNEL_PITCH));
+        this.yawRateSetting = clampRate(config.getRcRate(FpvDroneConfig.CHANNEL_YAW));
+        this.yawSuper = clampUnit(config.getSuperRate(FpvDroneConfig.CHANNEL_YAW));
+        this.yawExpo = clampUnit(config.getExpo(FpvDroneConfig.CHANNEL_YAW));
+        this.motorKv = config.getMotorKv();
+        this.propDiameterInch = config.getPropDiameterInch();
+        this.propPitchInch = config.getPropPitchInch();
+        this.dragCoefficientSetting = clamp(config.getDragCoefficient(), 0.5f, 2.0f);
+        this.thrustMultiplier = clamp(config.getThrustMultiplier(), 0.5f, 2.0f);
+        this.flightMode3d = config.isFlightMode3d();
+        recalculateDerived();
+    }
+
+    public void setControlRates(
+        final float rollRate,
+        final float rollSuper,
+        final float rollExpo,
+        final float pitchRate,
+        final float pitchSuper,
+        final float pitchExpo,
+        final float yawRate,
+        final float yawSuper,
+        final float yawExpo
+    ) {
+        this.rollRateSetting = clampRate(rollRate);
+        this.rollSuper = clampUnit(rollSuper);
+        this.rollExpo = clampUnit(rollExpo);
+        this.pitchRateSetting = clampRate(pitchRate);
+        this.pitchSuper = clampUnit(pitchSuper);
+        this.pitchExpo = clampUnit(pitchExpo);
+        this.yawRateSetting = clampRate(yawRate);
+        this.yawSuper = clampUnit(yawSuper);
+        this.yawExpo = clampUnit(yawExpo);
     }
 
     private void recalculateDerived() {
@@ -134,7 +182,7 @@ public class DronePhysics {
 
         final float referenceRadius = (float) Math.cbrt(3.0d * massKg / (REFERENCE_THRUST_LOADING * 4.0d * PI));
         final float diskArea = PI * referenceRadius * referenceRadius;
-        dragCoeff = AIR_DENSITY * diskArea * 1.05f / 2.0f;
+        dragCoeff = AIR_DENSITY * diskArea * dragCoefficientSetting / 2.0f;
 
         motorThermalCapacity = MOTOR_HEAT_CAPACITY_SCALE * motorHeatCapacityVolume();
         motorSurfaceArea = motorSurfaceArea();
@@ -275,7 +323,7 @@ public class DronePhysics {
 
     private void integrateStep(final float throttle, final float dt, final Vector3f displacement) {
         final float throttleScale = Mth.lerp(throttle, 4.0f, 3.6f);
-        final float motorCommand = throttleScale * batteryCells * throttle * motorCommandScale;
+        final float motorCommand = throttleScale * batteryCells * throttle * motorCommandScale * thrustMultiplier;
 
         final float speed = velocity.length();
         final Vector3f totalForce = new Vector3f(0.0f, -GRAVITY_ACCEL * massKg, 0.0f);
@@ -806,6 +854,18 @@ public class DronePhysics {
 
     public boolean isFlightMode3d() {
         return flightMode3d;
+    }
+
+    private static float clampRate(final float value) {
+        return Math.max(0.0F, Math.min(2.55F, value));
+    }
+
+    private static float clampUnit(final float value) {
+        return Math.max(0.0F, Math.min(1.0F, value));
+    }
+
+    private static float clamp(final float value, final float min, final float max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private record RotorForces(Vector3f force, Vector3f torque) {

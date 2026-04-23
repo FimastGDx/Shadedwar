@@ -24,8 +24,13 @@ public final class DroneEngineLoopSoundInstance extends AbstractTickableSoundIns
     private float targetGainHF = 1.0F;
     private float currentGainHF = 1.0F;
     private final double maxAudibleDistance;
+    private final DroneSoundEffects.SoundProfile soundProfile;
 
-    public DroneEngineLoopSoundInstance(final SoundEvent sound, final double maxAudibleDistance) {
+    public DroneEngineLoopSoundInstance(
+        final SoundEvent sound,
+        final double maxAudibleDistance,
+        final DroneSoundEffects.SoundProfile soundProfile
+    ) {
         super(sound, SoundSource.AMBIENT, SoundInstance.createUnseededRandom());
         this.looping = true;
         this.delay = 0;
@@ -34,6 +39,7 @@ public final class DroneEngineLoopSoundInstance extends AbstractTickableSoundIns
         this.volume = 0.0F;
         this.pitch = 1.0F;
         this.maxAudibleDistance = maxAudibleDistance;
+        this.soundProfile = soundProfile;
     }
 
     public void update(
@@ -124,7 +130,7 @@ public final class DroneEngineLoopSoundInstance extends AbstractTickableSoundIns
         float distanceVolumeFactor = 1.0F;
         if (minecraft.getCameraEntity() != null) {
             final double distance = minecraft.getCameraEntity().position().distanceTo(new Vec3(x, y, z));
-            distanceVolumeFactor = DroneSoundEffects.computeDistanceVolumeFactor(distance, maxAudibleDistance);
+            distanceVolumeFactor = DroneSoundEffects.computeDistanceVolumeFactor(distance, maxAudibleDistance, soundProfile);
         }
         final float fadeMultiplier = (float) fadeTicks / (float) MAX_FADE_TICKS;
         final float desiredVolume = targetVolume * fadeMultiplier * distanceVolumeFactor;

@@ -109,7 +109,7 @@ public final class FullfudClientConfig {
 
             fpvControllerDeadzone = builder
                 .comment("Deadzone for pitch/roll/yaw (0..0.5).")
-                .defineInRange("deadzone", 0.08D, 0.0D, 0.5D);
+                .defineInRange("deadzone", 0.05D, 0.0D, 0.5D);
 
             fpvControllerThrottleSlew = builder
                 .comment("Throttle smoothing per tick (0 = instant, 1 = very slow).")

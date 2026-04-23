@@ -4,7 +4,6 @@ import com.fullfud.fullfud.client.input.ControllerCalibration;
 import com.fullfud.fullfud.client.input.ControllerCalibrationStore;
 import com.fullfud.fullfud.client.input.FpvControllerInput;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
@@ -24,14 +23,15 @@ public class ControllerCalibrationScreen extends Screen {
     private final ControllerCalibration targetCalibration;
     private final ControllerCalibration workingCalibration;
 
-    private Button controllerButton;
-    private Button stickWizardButton;
-    private Button armWizardButton;
-    private Button rangeButton;
-    private Button saveButton;
-    private Button cancelButton;
-    private final Button[] assignButtons = new Button[ROW_COUNT];
-    private final Button[] invertButtons = new Button[ROW_COUNT];
+    private FpvHudButton controllerButton;
+    private FpvHudButton stickWizardButton;
+    private FpvHudButton armWizardButton;
+    private FpvHudButton ratesButton;
+    private FpvHudButton rangeButton;
+    private FpvHudButton saveButton;
+    private FpvHudButton cancelButton;
+    private final FpvHudButton[] assignButtons = new FpvHudButton[ROW_COUNT];
+    private final FpvHudButton[] invertButtons = new FpvHudButton[ROW_COUNT];
 
     private float[] baselineAxes = new float[0];
     private byte[] baselineButtons = new byte[0];
@@ -51,43 +51,34 @@ public class ControllerCalibrationScreen extends Screen {
         final int left = width / 2 - 155;
         final int top = 46;
 
-        controllerButton = addRenderableWidget(Button.builder(Component.empty(), button -> openControllerSelection())
-            .bounds(left, top, 310, 20)
-            .build());
+        controllerButton = addRenderableWidget(new FpvHudButton(left, top, 310, 20, Component.empty(), this::openControllerSelection));
 
-        stickWizardButton = addRenderableWidget(Button.builder(
-                Component.translatable("screen.fullfud.calibration.wizard.sticks"),
-                button -> openStickWizard()
-            )
-            .bounds(left, top + 24, 152, 20)
-            .build());
-        armWizardButton = addRenderableWidget(Button.builder(
-                Component.translatable("screen.fullfud.calibration.wizard.arm"),
-                button -> openArmWizard()
-            )
-            .bounds(left + 158, top + 24, 152, 20)
-            .build());
+        stickWizardButton = addRenderableWidget(new FpvHudButton(
+            left, top + 24, 152, 20,
+            Component.translatable("screen.fullfud.calibration.wizard.sticks"),
+            this::openStickWizard
+        ));
+        armWizardButton = addRenderableWidget(new FpvHudButton(
+            left + 158, top + 24, 152, 20,
+            Component.translatable("screen.fullfud.calibration.wizard.arm"),
+            this::openArmWizard
+        ));
+        ratesButton = addRenderableWidget(new FpvHudButton(
+            left + 105, height - 54, 100, 20,
+            Component.translatable("screen.fullfud.calibration.rates.button"),
+            this::openRatesScreen
+        ));
 
         for (int row = 0; row < ROW_COUNT; row++) {
             final int y = top + 68 + row * 26;
             final int currentRow = row;
-            assignButtons[row] = addRenderableWidget(Button.builder(Component.empty(), button -> toggleAssignment(currentRow))
-                .bounds(left + 140, y, 90, 20)
-                .build());
-            invertButtons[row] = addRenderableWidget(Button.builder(Component.empty(), button -> toggleInversion(currentRow))
-                .bounds(left + 236, y, 74, 20)
-                .build());
+            assignButtons[row] = addRenderableWidget(new FpvHudButton(left + 140, y, 90, 20, Component.empty(), () -> toggleAssignment(currentRow)));
+            invertButtons[row] = addRenderableWidget(new FpvHudButton(left + 236, y, 74, 20, Component.empty(), () -> toggleInversion(currentRow)));
         }
 
-        rangeButton = addRenderableWidget(Button.builder(Component.empty(), button -> toggleRangeCalibration())
-            .bounds(left, height - 54, 150, 20)
-            .build());
-        saveButton = addRenderableWidget(Button.builder(Component.translatable("screen.fullfud.calibration.save"), button -> saveAndClose())
-            .bounds(width / 2 - 75, height - 28, 150, 20)
-            .build());
-        cancelButton = addRenderableWidget(Button.builder(Component.translatable("screen.fullfud.calibration.cancel"), button -> onClose())
-            .bounds(left + 160, height - 54, 150, 20)
-            .build());
+        rangeButton = addRenderableWidget(new FpvHudButton(left, height - 54, 100, 20, Component.empty(), this::toggleRangeCalibration));
+        saveButton = addRenderableWidget(new FpvHudButton(width / 2 - 75, height - 28, 150, 20, Component.translatable("screen.fullfud.calibration.save"), this::saveAndClose));
+        cancelButton = addRenderableWidget(new FpvHudButton(left + 210, height - 54, 100, 20, Component.translatable("screen.fullfud.calibration.cancel"), this::onClose));
 
         refreshLiveState();
         refreshButtons();
@@ -168,6 +159,13 @@ public class ControllerCalibrationScreen extends Screen {
             return;
         }
         minecraft.setScreen(new ControllerArmWizardScreen(this, workingCalibration));
+    }
+
+    public void openRatesScreen() {
+        if (minecraft == null) {
+            return;
+        }
+        minecraft.setScreen(new ControllerRatesScreen(this, workingCalibration));
     }
 
     private void toggleAssignment(final int row) {
@@ -319,12 +317,14 @@ public class ControllerCalibrationScreen extends Screen {
                 : "screen.fullfud.calibration.range.start"
         ));
         rangeButton.active = hasControllerInput() && workingCalibration.hasCompleteAxisMapping();
+        ratesButton.active = !workingCalibration.isSampling();
 
         for (int row = 0; row < ROW_COUNT; row++) {
-            final Button assignButton = assignButtons[row];
-            final Button invertButton = invertButtons[row];
+            final FpvHudButton assignButton = assignButtons[row];
+            final FpvHudButton invertButton = invertButtons[row];
             assignButton.setMessage(bindingLabel(row));
             assignButton.active = hasControllerInput() && !workingCalibration.isSampling();
+            assignButton.setSelected(activeAssignRow == row);
 
             invertButton.setMessage(invertLabel(row));
             invertButton.active = row == ARM_ROW
@@ -410,41 +410,46 @@ public class ControllerCalibrationScreen extends Screen {
 
     @Override
     public void render(final GuiGraphics graphics, final int mouseX, final int mouseY, final float partialTick) {
-        renderBackground(graphics);
+        FpvHudUi.renderBackdrop(graphics, width, height);
         super.render(graphics, mouseX, mouseY, partialTick);
 
         final int cx = width / 2;
         final int left = width / 2 - 155;
         int y = 16;
 
-        graphics.drawCenteredString(font, title, cx, y, 0xFFFFFF);
+        FpvHudUi.renderPanel(graphics, left - 12, 12, 334, 82);
+        FpvHudUi.renderPanel(graphics, left - 12, 104, 334, 142);
+        FpvHudUi.renderPanel(graphics, left - 12, height - 66, 334, 32);
+
+        graphics.drawCenteredString(font, title, cx, y, FpvHudUi.TEXT);
         y += 14;
-        graphics.drawCenteredString(font, currentInstruction(), cx, y, 0xCCCCCC);
+        FpvHudUi.drawMutedCentered(graphics, font, currentInstruction(), cx, y);
         y += 16;
 
-        graphics.drawCenteredString(
+        FpvHudUi.drawAccentCentered(
+            graphics,
             font,
             Component.translatable(
                 "screen.fullfud.calibration.debug.current_controller",
                 liveControllerName.isBlank() ? "-" : liveControllerName
             ),
             cx,
-            y,
-            0x88FF88
+            y
         );
         y += 10;
-        graphics.drawCenteredString(
+        FpvHudUi.drawMutedCentered(
+            graphics,
             font,
             Component.translatable(
                 "screen.fullfud.calibration.debug.saved_controller",
                 workingCalibration.getControllerName().isBlank() ? "-" : workingCalibration.getControllerName()
             ),
             cx,
-            y,
-            0x88C0FF
+            y
         );
         y += 10;
-        graphics.drawCenteredString(
+        FpvHudUi.drawMutedCentered(
+            graphics,
             font,
             Component.translatable(
                 "screen.fullfud.calibration.debug.ready_state",
@@ -457,28 +462,27 @@ public class ControllerCalibrationScreen extends Screen {
                 liveButtons.length
             ),
             cx,
-            y,
-            0xBBBBBB
+            y
         );
         y += 10;
-        graphics.drawCenteredString(
+        FpvHudUi.drawMutedCentered(
+            graphics,
             font,
             Component.translatable(
                 "screen.fullfud.calibration.debug.range_state",
                 workingCalibration.getRangeAxisCount()
             ),
             cx,
-            y,
-            0xBBBBBB
+            y
         );
 
         int rowY = 116;
         for (int row = 0; row < ROW_COUNT; row++) {
-            graphics.drawString(font, rowName(row), left, rowY + 6, 0xFFFFFF);
+            graphics.drawString(font, rowName(row), left, rowY + 6, FpvHudUi.TEXT);
             if (row != ARM_ROW) {
                 renderAxisPreview(graphics, left + 72, rowY + 6, row);
             } else {
-                graphics.drawString(font, armPressedLabel(), left + 72, rowY + 6, 0xFFCC88);
+                graphics.drawString(font, armPressedLabel(), left + 72, rowY + 6, FpvHudUi.TEXT_WARN);
             }
             rowY += 26;
         }
@@ -488,7 +492,7 @@ public class ControllerCalibrationScreen extends Screen {
             statusLine(),
             cx,
             height - 72,
-            0xBBBBBB
+            FpvHudUi.TEXT_MUTED
         );
     }
 
@@ -530,11 +534,11 @@ public class ControllerCalibrationScreen extends Screen {
     }
 
     private void renderAxisPreview(final GuiGraphics graphics, final int x, final int y, final int logicalAxis) {
-        graphics.fill(x, y, x + BAR_WIDTH, y + BAR_HEIGHT, 0xFF333333);
+        graphics.fill(x, y, x + BAR_WIDTH, y + BAR_HEIGHT, 0xCC11161D);
 
         final int physicalAxis = workingCalibration.getAxisMapping(logicalAxis);
         if (physicalAxis < 0) {
-            graphics.drawString(font, "-", x + BAR_WIDTH + 8, y - 1, 0x777777);
+            graphics.drawString(font, "-", x + BAR_WIDTH + 8, y - 1, FpvHudUi.TEXT_MUTED);
             return;
         }
 
@@ -550,19 +554,19 @@ public class ControllerCalibrationScreen extends Screen {
         }
 
         final int centerX = x + BAR_WIDTH / 2;
-        graphics.fill(centerX, y, centerX + 1, y + BAR_HEIGHT, 0xFF666666);
+        graphics.fill(centerX, y, centerX + 1, y + BAR_HEIGHT, FpvHudUi.BORDER);
 
         final int indicatorX = x + (int) (((value + 1.0F) * 0.5F) * BAR_WIDTH);
-        graphics.fill(indicatorX - 1, y, indicatorX + 1, y + BAR_HEIGHT, 0xFF00FF88);
+        graphics.fill(indicatorX - 1, y, indicatorX + 1, y + BAR_HEIGHT, FpvHudUi.TEXT_OK);
 
         if (workingCalibration.isSampling()) {
             final float min = rangeToBar(workingCalibration.getSampleMin(physicalAxis));
             final float max = rangeToBar(workingCalibration.getSampleMax(physicalAxis));
             graphics.fill(x + (int) min, y, x + (int) min + 1, y + BAR_HEIGHT, 0xFFFF5555);
-            graphics.fill(x + (int) max, y, x + (int) max + 1, y + BAR_HEIGHT, 0xFF5599FF);
+            graphics.fill(x + (int) max, y, x + (int) max + 1, y + BAR_HEIGHT, FpvHudUi.SLIDER_TRACK);
         }
 
-        graphics.drawString(font, String.format("%.2f", value), x + BAR_WIDTH + 8, y - 1, 0x999999);
+        graphics.drawString(font, String.format("%.2f", value), x + BAR_WIDTH + 8, y - 1, FpvHudUi.TEXT_MUTED);
     }
 
     private float rangeToBar(final float raw) {

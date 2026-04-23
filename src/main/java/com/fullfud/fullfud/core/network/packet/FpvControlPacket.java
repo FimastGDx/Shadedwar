@@ -11,6 +11,15 @@ public record FpvControlPacket(UUID droneId,
                                float pitchInput,
                                float rollInput,
                                float yawInput,
+                               float rollRate,
+                               float rollSuper,
+                               float rollExpo,
+                               float pitchRate,
+                               float pitchSuper,
+                               float pitchExpo,
+                               float yawRate,
+                               float yawSuper,
+                               float yawExpo,
                                float mousePitchDelta,
                                float mouseRollDelta,
                                float throttle,
@@ -21,11 +30,38 @@ public record FpvControlPacket(UUID droneId,
         final float pitch = buffer.readFloat();
         final float roll = buffer.readFloat();
         final float yaw = buffer.readFloat();
+        final float rollRate = buffer.readFloat();
+        final float rollSuper = buffer.readFloat();
+        final float rollExpo = buffer.readFloat();
+        final float pitchRate = buffer.readFloat();
+        final float pitchSuper = buffer.readFloat();
+        final float pitchExpo = buffer.readFloat();
+        final float yawRate = buffer.readFloat();
+        final float yawSuper = buffer.readFloat();
+        final float yawExpo = buffer.readFloat();
         final float mousePitchDelta = buffer.readFloat();
         final float mouseRollDelta = buffer.readFloat();
         final float throttle = buffer.readFloat();
         final byte arm = buffer.readByte();
-        return new FpvControlPacket(droneId, pitch, roll, yaw, mousePitchDelta, mouseRollDelta, throttle, arm);
+        return new FpvControlPacket(
+            droneId,
+            pitch,
+            roll,
+            yaw,
+            rollRate,
+            rollSuper,
+            rollExpo,
+            pitchRate,
+            pitchSuper,
+            pitchExpo,
+            yawRate,
+            yawSuper,
+            yawExpo,
+            mousePitchDelta,
+            mouseRollDelta,
+            throttle,
+            arm
+        );
     }
 
     public void encode(final FriendlyByteBuf buffer) {
@@ -33,6 +69,15 @@ public record FpvControlPacket(UUID droneId,
         buffer.writeFloat(pitchInput);
         buffer.writeFloat(rollInput);
         buffer.writeFloat(yawInput);
+        buffer.writeFloat(rollRate);
+        buffer.writeFloat(rollSuper);
+        buffer.writeFloat(rollExpo);
+        buffer.writeFloat(pitchRate);
+        buffer.writeFloat(pitchSuper);
+        buffer.writeFloat(pitchExpo);
+        buffer.writeFloat(yawRate);
+        buffer.writeFloat(yawSuper);
+        buffer.writeFloat(yawExpo);
         buffer.writeFloat(mousePitchDelta);
         buffer.writeFloat(mouseRollDelta);
         buffer.writeFloat(throttle);

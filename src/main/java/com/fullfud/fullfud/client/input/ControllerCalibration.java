@@ -18,11 +18,26 @@ public class ControllerCalibration {
     public static final int AXIS_COUNT = 4;
 
     public static final int NO_ARM_BINDING = Integer.MIN_VALUE;
+    private static final int DEFAULT_RANGE_AXIS_COUNT = 16;
+    private static final int DEFAULT_ARM_BUTTON = 0;
 
     private static final String[] AXIS_NAMES = {"Roll", "Pitch", "Yaw", "Throttle"};
+    private static final int[] DEFAULT_AXIS_MAPPING = {2, 3, 0, 1};
+    private static final float[] DEFAULT_RC_RATE = {1.15F, 1.15F, 1.15F, 1.0F};
+    private static final float[] DEFAULT_SUPER_RATE = {0.67F, 0.67F, 0.67F, 0.7F};
+    private static final float[] DEFAULT_EXPO = {0.0F, 0.0F, 0.0F, 0.0F};
+    private static final float[] SLOW_RC_RATE = {0.7F, 0.7F, 0.7F, 1.0F};
+    private static final float[] SLOW_SUPER_RATE = {0.5F, 0.5F, 0.5F, 0.7F};
+    private static final float[] SLOW_EXPO = {0.2F, 0.2F, 0.2F, 0.0F};
+    private static final float[] FAST_RC_RATE = {1.0F, 1.0F, 1.0F, 1.0F};
+    private static final float[] FAST_SUPER_RATE = {0.7F, 0.7F, 0.7F, 0.7F};
+    private static final float[] FAST_EXPO = {0.0F, 0.0F, 0.0F, 0.0F};
 
     private final int[] axisMapping = new int[AXIS_COUNT];
     private final boolean[] axisInverted = new boolean[AXIS_COUNT];
+    private final float[] rcRate = new float[AXIS_COUNT];
+    private final float[] superRate = new float[AXIS_COUNT];
+    private final float[] expo = new float[AXIS_COUNT];
 
     private float[] rangeMin = new float[0];
     private float[] rangeMax = new float[0];
@@ -53,14 +68,19 @@ public class ControllerCalibration {
     }
 
     public void reset() {
-        Arrays.fill(axisMapping, -1);
+        System.arraycopy(DEFAULT_AXIS_MAPPING, 0, axisMapping, 0, AXIS_COUNT);
         Arrays.fill(axisInverted, false);
-        rangeMin = new float[0];
-        rangeMax = new float[0];
+        System.arraycopy(DEFAULT_RC_RATE, 0, rcRate, 0, AXIS_COUNT);
+        System.arraycopy(DEFAULT_SUPER_RATE, 0, superRate, 0, AXIS_COUNT);
+        System.arraycopy(DEFAULT_EXPO, 0, expo, 0, AXIS_COUNT);
+        rangeMin = new float[DEFAULT_RANGE_AXIS_COUNT];
+        rangeMax = new float[DEFAULT_RANGE_AXIS_COUNT];
+        Arrays.fill(rangeMin, -1.0F);
+        Arrays.fill(rangeMax, 1.0F);
         sampleMin = new float[0];
         sampleMax = new float[0];
         sampling = false;
-        armBinding = NO_ARM_BINDING;
+        armBinding = DEFAULT_ARM_BUTTON;
         armInverted = false;
         controllerName = "";
     }
@@ -93,6 +113,51 @@ public class ControllerCalibration {
 
     public boolean isAxisInverted(final int logicalAxis) {
         return logicalAxis >= 0 && logicalAxis < AXIS_COUNT && axisInverted[logicalAxis];
+    }
+
+    public float getRcRate(final int logicalAxis) {
+        return logicalAxis >= 0 && logicalAxis < AXIS_COUNT ? rcRate[logicalAxis] : 1.0F;
+    }
+
+    public void setRcRate(final int logicalAxis, final float value) {
+        if (logicalAxis < 0 || logicalAxis >= AXIS_COUNT) {
+            return;
+        }
+        rcRate[logicalAxis] = clampRate(value);
+    }
+
+    public float getSuperRate(final int logicalAxis) {
+        return logicalAxis >= 0 && logicalAxis < AXIS_COUNT ? superRate[logicalAxis] : 0.0F;
+    }
+
+    public void setSuperRate(final int logicalAxis, final float value) {
+        if (logicalAxis < 0 || logicalAxis >= AXIS_COUNT) {
+            return;
+        }
+        superRate[logicalAxis] = clampUnit(value);
+    }
+
+    public float getExpo(final int logicalAxis) {
+        return logicalAxis >= 0 && logicalAxis < AXIS_COUNT ? expo[logicalAxis] : 0.0F;
+    }
+
+    public void setExpo(final int logicalAxis, final float value) {
+        if (logicalAxis < 0 || logicalAxis >= AXIS_COUNT) {
+            return;
+        }
+        expo[logicalAxis] = clampUnit(value);
+    }
+
+    public void applySlowPreset() {
+        System.arraycopy(SLOW_RC_RATE, 0, rcRate, 0, AXIS_COUNT);
+        System.arraycopy(SLOW_SUPER_RATE, 0, superRate, 0, AXIS_COUNT);
+        System.arraycopy(SLOW_EXPO, 0, expo, 0, AXIS_COUNT);
+    }
+
+    public void applyFastPreset() {
+        System.arraycopy(FAST_RC_RATE, 0, rcRate, 0, AXIS_COUNT);
+        System.arraycopy(FAST_SUPER_RATE, 0, superRate, 0, AXIS_COUNT);
+        System.arraycopy(FAST_EXPO, 0, expo, 0, AXIS_COUNT);
     }
 
     public void setArmBinding(final int binding, final boolean inverted) {
@@ -250,6 +315,13 @@ public class ControllerCalibration {
         return Math.max(0.0F, Math.min(1.0F, (value + 1.0F) * 0.5F));
     }
 
+    public float computeRateDegrees(final int logicalAxis, final float input) {
+        if (logicalAxis < 0 || logicalAxis >= AXIS_COUNT) {
+            return 0.0F;
+        }
+        return shapeRate(input, rcRate[logicalAxis], superRate[logicalAxis], expo[logicalAxis]);
+    }
+
     public float getRangeMin(final int physicalAxis) {
         if (physicalAxis < 0 || physicalAxis >= rangeMin.length) {
             return -1.0F;
@@ -286,6 +358,9 @@ public class ControllerCalibration {
         for (int i = 0; i < AXIS_COUNT; i++) {
             tag.putInt("Mapping" + i, axisMapping[i]);
             tag.putBoolean("Inverted" + i, axisInverted[i]);
+            tag.putFloat("RcRate" + i, rcRate[i]);
+            tag.putFloat("SuperRate" + i, superRate[i]);
+            tag.putFloat("Expo" + i, expo[i]);
         }
         tag.putInt("RangeAxisCount", rangeMin.length);
         for (int i = 0; i < rangeMin.length; i++) {
@@ -316,6 +391,15 @@ public class ControllerCalibration {
             }
             if (tag.contains("Inverted" + i)) {
                 axisInverted[i] = tag.getBoolean("Inverted" + i);
+            }
+            if (tag.contains("RcRate" + i)) {
+                rcRate[i] = clampRate(tag.getFloat("RcRate" + i));
+            }
+            if (tag.contains("SuperRate" + i)) {
+                superRate[i] = clampUnit(tag.getFloat("SuperRate" + i));
+            }
+            if (tag.contains("Expo" + i)) {
+                expo[i] = clampUnit(tag.getFloat("Expo" + i));
             }
         }
 
@@ -385,5 +469,31 @@ public class ControllerCalibration {
             return "";
         }
         return name.toLowerCase(Locale.ROOT).replaceAll("[^\\p{L}\\p{Nd}]+", "");
+    }
+
+    private static float clampRate(final float value) {
+        return Math.max(0.0F, Math.min(2.55F, value));
+    }
+
+    private static float clampUnit(final float value) {
+        return Math.max(0.0F, Math.min(1.0F, value));
+    }
+
+    private static float shapeRate(float input, float rate, final float superRate, final float expo) {
+        input = Math.max(-1.0F, Math.min(1.0F, input));
+        final float absInput = Math.abs(input);
+        if (rate > 2.0F) {
+            rate += 14.54F * (rate - 2.0F);
+        }
+        if (expo != 0.0F) {
+            input = input * absInput * absInput * expo + input * (1.0F - expo);
+        }
+
+        float degPerSecond = 200.0F * rate * input;
+        if (superRate != 0.0F) {
+            final float superFactor = 1.0F / Math.max(0.01F, Math.min(1.0F, 1.0F - absInput * superRate));
+            degPerSecond *= superFactor;
+        }
+        return degPerSecond;
     }
 }

@@ -3,7 +3,6 @@ package com.fullfud.fullfud.client.screen;
 import com.fullfud.fullfud.client.input.ControllerCalibration;
 import com.fullfud.fullfud.client.input.FpvControllerInput;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraftforge.api.distmarker.Dist;
@@ -17,10 +16,10 @@ public class ControllerArmWizardScreen extends Screen {
     private final ControllerCalibrationScreen parentScreen;
     private final ControllerCalibration calibration;
 
-    private Button backButton;
-    private Button proceedButton;
-    private Button retryButton;
-    private Button flipButton;
+    private FpvHudButton backButton;
+    private FpvHudButton proceedButton;
+    private FpvHudButton retryButton;
+    private FpvHudButton flipButton;
 
     private float[] baselineAxes = new float[0];
     private byte[] baselineButtons = new byte[0];
@@ -41,30 +40,10 @@ public class ControllerArmWizardScreen extends Screen {
     @Override
     protected void init() {
         final int bottom = height - 28;
-        backButton = addRenderableWidget(Button.builder(
-                Component.translatable("gui.back"),
-                button -> onBack()
-            )
-            .bounds(width / 2 - 155, bottom, 100, 20)
-            .build());
-        proceedButton = addRenderableWidget(Button.builder(
-                Component.empty(),
-                button -> onProceed()
-            )
-            .bounds(width / 2 + 55, bottom, 100, 20)
-            .build());
-        retryButton = addRenderableWidget(Button.builder(
-                Component.translatable("screen.fullfud.calibration.wizard.retry"),
-                button -> restartListening()
-            )
-            .bounds(width / 2 - 50, bottom - 24, 100, 20)
-            .build());
-        flipButton = addRenderableWidget(Button.builder(
-                Component.translatable("screen.fullfud.calibration.wizard.arm.flip_button"),
-                button -> flipArmDirection()
-            )
-            .bounds(width / 2 - 70, bottom - 24, 140, 20)
-            .build());
+        backButton = addRenderableWidget(new FpvHudButton(width / 2 - 155, bottom, 100, 20, Component.translatable("gui.back"), this::onBack));
+        proceedButton = addRenderableWidget(new FpvHudButton(width / 2 + 55, bottom, 100, 20, Component.empty(), this::onProceed));
+        retryButton = addRenderableWidget(new FpvHudButton(width / 2 - 50, bottom - 24, 100, 20, Component.translatable("screen.fullfud.calibration.wizard.retry"), this::restartListening));
+        flipButton = addRenderableWidget(new FpvHudButton(width / 2 - 70, bottom - 24, 140, 20, Component.translatable("screen.fullfud.calibration.wizard.arm.flip_button"), this::flipArmDirection));
 
         refreshLiveState();
         restartListening();
@@ -236,22 +215,24 @@ public class ControllerArmWizardScreen extends Screen {
 
     @Override
     public void render(final GuiGraphics graphics, final int mouseX, final int mouseY, final float partialTick) {
-        renderBackground(graphics);
+        FpvHudUi.renderBackdrop(graphics, width, height);
         super.render(graphics, mouseX, mouseY, partialTick);
 
         final int cx = width / 2;
-        graphics.drawCenteredString(font, title, cx, 16, 0xFFFFFF);
-        graphics.drawCenteredString(font, currentTitle(), cx, 36, 0xFFFFFF);
-        graphics.drawCenteredString(font, currentSubtitle(), cx, 50, 0xBBBBBB);
-        graphics.drawCenteredString(
+        FpvHudUi.renderPanel(graphics, width / 2 - 170, 12, 340, 74);
+        FpvHudUi.renderPanel(graphics, width / 2 - 170, 92, 340, 40);
+        graphics.drawCenteredString(font, title, cx, 16, FpvHudUi.TEXT);
+        graphics.drawCenteredString(font, currentTitle(), cx, 36, FpvHudUi.TEXT);
+        FpvHudUi.drawMutedCentered(graphics, font, currentSubtitle(), cx, 50);
+        FpvHudUi.drawAccentCentered(
+            graphics,
             font,
             Component.translatable(
                 "screen.fullfud.calibration.debug.current_controller",
                 liveControllerName.isBlank() ? "-" : liveControllerName
             ),
             cx,
-            66,
-            0x88C0FF
+            66
         );
 
         graphics.drawCenteredString(
@@ -267,7 +248,7 @@ public class ControllerArmWizardScreen extends Screen {
             ),
             cx,
             102,
-            0xFFFFFF
+            FpvHudUi.TEXT
         );
     }
 

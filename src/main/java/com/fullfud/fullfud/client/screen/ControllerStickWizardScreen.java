@@ -3,7 +3,6 @@ package com.fullfud.fullfud.client.screen;
 import com.fullfud.fullfud.client.input.ControllerCalibration;
 import com.fullfud.fullfud.client.input.FpvControllerInput;
 import net.minecraft.client.gui.GuiGraphics;
-import net.minecraft.client.gui.components.Button;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
@@ -19,9 +18,9 @@ public class ControllerStickWizardScreen extends Screen {
     private final ControllerCalibrationScreen parentScreen;
     private final ControllerCalibration calibration;
 
-    private Button backButton;
-    private Button proceedButton;
-    private Button retryButton;
+    private FpvHudButton backButton;
+    private FpvHudButton proceedButton;
+    private FpvHudButton retryButton;
 
     private float[] baselineAxes = new float[0];
     private float[] liveAxes = new float[0];
@@ -41,24 +40,9 @@ public class ControllerStickWizardScreen extends Screen {
     @Override
     protected void init() {
         final int bottom = height - 28;
-        backButton = addRenderableWidget(Button.builder(
-                Component.translatable("screen.fullfud.calibration.cancel"),
-                button -> onBack()
-            )
-            .bounds(width / 2 - 155, bottom, 100, 20)
-            .build());
-        proceedButton = addRenderableWidget(Button.builder(
-                Component.empty(),
-                button -> onProceed()
-            )
-            .bounds(width / 2 + 55, bottom, 100, 20)
-            .build());
-        retryButton = addRenderableWidget(Button.builder(
-                Component.translatable("screen.fullfud.calibration.wizard.retry"),
-                button -> onRetry()
-            )
-            .bounds(width / 2 - 50, bottom - 24, 100, 20)
-            .build());
+        backButton = addRenderableWidget(new FpvHudButton(width / 2 - 155, bottom, 100, 20, Component.translatable("screen.fullfud.calibration.cancel"), this::onBack));
+        proceedButton = addRenderableWidget(new FpvHudButton(width / 2 + 55, bottom, 100, 20, Component.empty(), this::onProceed));
+        retryButton = addRenderableWidget(new FpvHudButton(width / 2 - 50, bottom - 24, 100, 20, Component.translatable("screen.fullfud.calibration.wizard.retry"), this::onRetry));
 
         refreshLiveState();
         refreshButtons();
@@ -349,22 +333,27 @@ public class ControllerStickWizardScreen extends Screen {
 
     @Override
     public void render(final GuiGraphics graphics, final int mouseX, final int mouseY, final float partialTick) {
-        renderBackground(graphics);
+        FpvHudUi.renderBackdrop(graphics, width, height);
         super.render(graphics, mouseX, mouseY, partialTick);
 
         final int cx = width / 2;
-        graphics.drawCenteredString(font, title, cx, 16, 0xFFFFFF);
-        graphics.drawCenteredString(font, currentTitle(), cx, 36, 0xFFFFFF);
-        graphics.drawCenteredString(font, currentSubtitle(), cx, 50, 0xBBBBBB);
-        graphics.drawCenteredString(
+        FpvHudUi.renderPanel(graphics, width / 2 - 170, 12, 340, 70);
+        FpvHudUi.renderPanel(graphics, width / 2 - 170, 88, 340, 118);
+        if (step == Step.RANGE || step == Step.VERIFY) {
+            FpvHudUi.renderPanel(graphics, width / 2 - 170, 210, 340, 24);
+        }
+        graphics.drawCenteredString(font, title, cx, 16, FpvHudUi.TEXT);
+        graphics.drawCenteredString(font, currentTitle(), cx, 36, FpvHudUi.TEXT);
+        FpvHudUi.drawMutedCentered(graphics, font, currentSubtitle(), cx, 50);
+        FpvHudUi.drawAccentCentered(
+            graphics,
             font,
             Component.translatable(
                 "screen.fullfud.calibration.debug.current_controller",
                 liveControllerName.isBlank() ? "-" : liveControllerName
             ),
             cx,
-            64,
-            0x88C0FF
+            64
         );
 
         renderChannelRow(graphics, 94, ControllerCalibration.AXIS_THROTTLE);
@@ -381,7 +370,7 @@ public class ControllerStickWizardScreen extends Screen {
                 ),
                 cx,
                 208,
-                0xBBBBBB
+                FpvHudUi.TEXT_MUTED
             );
         }
     }
@@ -396,14 +385,14 @@ public class ControllerStickWizardScreen extends Screen {
             rowName(logicalAxis),
             left,
             y + 1,
-            highlighted ? 0xFFFF88 : 0xFFFFFF
+            highlighted ? FpvHudUi.TEXT_WARN : FpvHudUi.TEXT
         );
         renderAxisPreview(graphics, barX, y, logicalAxis);
-        graphics.drawString(font, describeAssignment(logicalAxis), barX + BAR_WIDTH + 10, y + 1, 0xAAAAAA);
+        graphics.drawString(font, describeAssignment(logicalAxis), barX + BAR_WIDTH + 10, y + 1, FpvHudUi.TEXT_MUTED);
     }
 
     private void renderAxisPreview(final GuiGraphics graphics, final int x, final int y, final int logicalAxis) {
-        graphics.fill(x, y, x + BAR_WIDTH, y + BAR_HEIGHT, 0xFF333333);
+        graphics.fill(x, y, x + BAR_WIDTH, y + BAR_HEIGHT, 0xCC11161D);
 
         final int physicalAxis = calibration.getAxisMapping(logicalAxis);
         if (physicalAxis < 0) {
@@ -422,16 +411,16 @@ public class ControllerStickWizardScreen extends Screen {
         }
 
         final int centerX = x + BAR_WIDTH / 2;
-        graphics.fill(centerX, y, centerX + 1, y + BAR_HEIGHT, 0xFF666666);
+        graphics.fill(centerX, y, centerX + 1, y + BAR_HEIGHT, FpvHudUi.BORDER);
 
         final int indicatorX = x + (int) (((value + 1.0F) * 0.5F) * BAR_WIDTH);
-        graphics.fill(indicatorX - 1, y, indicatorX + 1, y + BAR_HEIGHT, 0xFF00FF88);
+        graphics.fill(indicatorX - 1, y, indicatorX + 1, y + BAR_HEIGHT, FpvHudUi.TEXT_OK);
 
         if (step == Step.RANGE && calibration.isSampling()) {
             final float min = rangeToBar(calibration.getSampleMin(physicalAxis));
             final float max = rangeToBar(calibration.getSampleMax(physicalAxis));
             graphics.fill(x + (int) min, y, x + (int) min + 1, y + BAR_HEIGHT, 0xFFFF5555);
-            graphics.fill(x + (int) max, y, x + (int) max + 1, y + BAR_HEIGHT, 0xFF5599FF);
+            graphics.fill(x + (int) max, y, x + (int) max + 1, y + BAR_HEIGHT, FpvHudUi.SLIDER_TRACK);
         }
     }
 
