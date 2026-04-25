@@ -6,7 +6,6 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
-import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
@@ -25,22 +24,18 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraftforge.common.Tags;
 import net.minecraftforge.network.NetworkHooks;
 
-import java.util.HashMap;
-import java.util.Map;
-
 public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
-    private static final Object ACTIVE_COUNT_LOCK = new Object();
-    private static final Map<ResourceKey<Level>, Integer> ACTIVE_COUNTS = new HashMap<>();
-    private static final int MAX_ACTIVE_PER_LEVEL = 384;
     private static final int MAX_SPAWN_PER_EXPLOSION = 160;
+    private static final int START_BLOCK_GRACE_TICKS = 2;
+    private static final double START_BLOCK_GRACE_RANGE_SQR = 1.5D * 1.5D;
 
     private float damage = 5.0F;
     private double maxRange = 50.0D;
     private Vec3 startPos;
-    private boolean countedActive;
 
     public ExplosionShrapnelEntity(final EntityType<? extends ExplosionShrapnelEntity> type, final Level level) {
         super(type, level);
+        this.noCulling = true;
     }
 
     public ExplosionShrapnelEntity(
@@ -52,6 +47,7 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
     ) {
         super(type, x, y, z, level);
         this.startPos = new Vec3(x, y, z);
+        this.noCulling = true;
     }
 
     public void setDamage(final float damage) {
@@ -70,11 +66,7 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
         if (level == null || requested <= 0) {
             return 0;
         }
-        synchronized (ACTIVE_COUNT_LOCK) {
-            final int active = ACTIVE_COUNTS.getOrDefault(level.dimension(), 0);
-            final int remainingCapacity = Math.max(0, MAX_ACTIVE_PER_LEVEL - active);
-            return Math.min(requested, Math.min(MAX_SPAWN_PER_EXPLOSION, remainingCapacity));
-        }
+        return Math.min(requested, MAX_SPAWN_PER_EXPLOSION);
     }
 
     @Override
@@ -129,6 +121,10 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
 
     @Override
     protected void onHitBlock(final BlockHitResult result) {
+        if (isInStartBlockGrace()) {
+            return;
+        }
+
         super.onHitBlock(result);
 
         if (level() instanceof ServerLevel serverLevel) {
@@ -149,24 +145,6 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
         return NetworkHooks.getEntitySpawningPacket(this);
     }
 
-    @Override
-    public void onAddedToWorld() {
-        super.onAddedToWorld();
-        if (!level().isClientSide() && !countedActive) {
-            adjustActiveCount(1);
-            countedActive = true;
-        }
-    }
-
-    @Override
-    public void remove(final RemovalReason reason) {
-        if (!level().isClientSide() && countedActive) {
-            adjustActiveCount(-1);
-            countedActive = false;
-        }
-        super.remove(reason);
-    }
-
     private float calculateDamage() {
         if (startPos == null) {
             return damage;
@@ -175,6 +153,12 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
         final double distance = position().distanceTo(startPos);
         final double falloff = Math.max(0.1D, 1.0D - distance / maxRange);
         return (float) (damage * falloff);
+    }
+
+    private boolean isInStartBlockGrace() {
+        return startPos != null
+            && tickCount <= START_BLOCK_GRACE_TICKS
+            && position().distanceToSqr(startPos) <= START_BLOCK_GRACE_RANGE_SQR;
     }
 
     private void spawnImpactEffects(final ServerLevel serverLevel) {
@@ -199,17 +183,5 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
 
     private boolean isSuperbWarfareVehicle(final Entity entity) {
         return SuperbWarfareCompat.isVehicle(entity);
-    }
-
-    private void adjustActiveCount(final int delta) {
-        synchronized (ACTIVE_COUNT_LOCK) {
-            final ResourceKey<Level> dimension = level().dimension();
-            final int updated = Math.max(0, ACTIVE_COUNTS.getOrDefault(dimension, 0) + delta);
-            if (updated == 0) {
-                ACTIVE_COUNTS.remove(dimension);
-            } else {
-                ACTIVE_COUNTS.put(dimension, updated);
-            }
-        }
     }
 }

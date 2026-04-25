@@ -27,6 +27,10 @@ public final class DroneExplosionEffects {
     private static final float SBW_VEHICLE_DIRECT_IMPACT_DAMAGE = 340.0F;
     private static final float SBW_VEHICLE_EXPLOSION_DAMAGE = 80.0F;
     private static final float SBW_VEHICLE_EXPLOSION_RADIUS = 5.0F;
+    private static final double SHRAPNEL_BASE_SPAWN_Y_OFFSET = 0.65D;
+    private static final double SHRAPNEL_SPAWN_CLEARANCE = 0.08D;
+    private static final double[] SHRAPNEL_FORWARD_SPAWN_OFFSETS = { 0.35D, 0.75D, 1.15D };
+    private static final double[] SHRAPNEL_VERTICAL_SPAWN_OFFSETS = { 0.0D, 0.25D, 0.55D, 0.9D };
 
     private static final BlastProfile FPV_PROFILE = new BlastProfile(180, 18.0F, 25.0D, 4.0F, 12.0F, 4.2F, ShrapnelPattern.HORIZONTAL_RING, 0.0F);
     private static final BlastProfile FPV_STRIKE_PROFILE = new BlastProfile(180, 18.0F, 25.0D, 4.0F, 12.0F, 4.2F, ShrapnelPattern.FORWARD_CONE, 16.0F);
@@ -198,22 +202,56 @@ public final class DroneExplosionEffects {
                 case SPHERICAL -> randomSphericalDirection(level);
                 case HORIZONTAL_RING -> randomHorizontalDirection(level);
             };
+            final Vec3 spawnPosition = resolveShrapnelSpawnPosition(level, origin, direction);
 
             final ExplosionShrapnelEntity shrapnel = new ExplosionShrapnelEntity(
                 FullfudRegistries.EXPLOSION_SHRAPNEL_ENTITY.get(),
-                origin.x,
-                origin.y + 0.5D,
-                origin.z,
+                spawnPosition.x,
+                spawnPosition.y,
+                spawnPosition.z,
                 level
             );
             shrapnel.setOwner(attacker != null ? attacker : source);
             RemotePlayerProtection.copyHazardTag(shrapnel, source);
             shrapnel.setDamage(profile.shrapnelDamage());
             shrapnel.setMaxRange(profile.shrapnelRange());
-            shrapnel.setStartPos(origin);
+            shrapnel.setStartPos(spawnPosition);
             shrapnel.shoot(direction.x, direction.y, direction.z, Math.max(0.4F, profile.shrapnelSpeedCap()), 5.0F);
             level.addFreshEntity(shrapnel);
         }
+    }
+
+    private static Vec3 resolveShrapnelSpawnPosition(final ServerLevel level, final Vec3 origin, final Vec3 direction) {
+        final Vec3 base = origin.add(0.0D, SHRAPNEL_BASE_SPAWN_Y_OFFSET, 0.0D);
+        final Vec3 normalizedDirection = direction.lengthSqr() > 1.0E-6D ? direction.normalize() : new Vec3(0.0D, 1.0D, 0.0D);
+
+        for (final double verticalOffset : SHRAPNEL_VERTICAL_SPAWN_OFFSETS) {
+            final Vec3 liftedBase = base.add(0.0D, verticalOffset, 0.0D);
+            if (isClearShrapnelSpawnPosition(level, liftedBase)) {
+                return liftedBase;
+            }
+
+            for (final double forwardOffset : SHRAPNEL_FORWARD_SPAWN_OFFSETS) {
+                final Vec3 candidate = liftedBase.add(normalizedDirection.scale(forwardOffset));
+                if (isClearShrapnelSpawnPosition(level, candidate)) {
+                    return candidate;
+                }
+            }
+        }
+
+        return base;
+    }
+
+    private static boolean isClearShrapnelSpawnPosition(final ServerLevel level, final Vec3 position) {
+        final AABB bounds = new AABB(
+            position.x - SHRAPNEL_SPAWN_CLEARANCE,
+            position.y - SHRAPNEL_SPAWN_CLEARANCE,
+            position.z - SHRAPNEL_SPAWN_CLEARANCE,
+            position.x + SHRAPNEL_SPAWN_CLEARANCE,
+            position.y + SHRAPNEL_SPAWN_CLEARANCE,
+            position.z + SHRAPNEL_SPAWN_CLEARANCE
+        );
+        return level.noCollision(bounds);
     }
 
     private static Vec3 randomHorizontalDirection(final ServerLevel level) {
