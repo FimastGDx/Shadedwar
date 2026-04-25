@@ -6,11 +6,10 @@ import com.fullfud.fullfud.common.entity.drone.DronePreset;
 import com.fullfud.fullfud.common.item.FpvConfiguratorItem;
 import com.fullfud.fullfud.common.item.FpvControllerItem;
 import com.fullfud.fullfud.common.item.FpvGogglesItem;
-import com.mojang.datafixers.util.Pair;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import com.fullfud.fullfud.core.DroneExplosionEffects;
 import com.fullfud.fullfud.core.DroneExplosionLimiter;
-import com.fullfud.fullfud.core.PlayerDecoyManager;
+import com.fullfud.fullfud.core.RemoteControlFailsafe;
 import com.fullfud.fullfud.core.RemotePlayerProtection;
 import com.fullfud.fullfud.core.config.FullfudClientConfig;
 import com.fullfud.fullfud.core.network.FullfudNetwork;
@@ -18,14 +17,13 @@ import com.fullfud.fullfud.core.network.packet.DroneAudioLoopPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioOneShotPacket;
 import com.fullfud.fullfud.core.network.packet.FpvControlPacket;
 import com.fullfud.fullfud.core.network.packet.OpenFpvConfiguratorPacket;
+import dev.lazurite.lattice.api.player.LatticeServerPlayer;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
-import net.minecraft.network.protocol.game.ClientboundRemoveEntitiesPacket;
-import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
 import com.fullfud.fullfud.core.ChunkLoadManager;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -78,8 +76,6 @@ import software.bernie.geckolib.util.GeckoLibUtil;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.List;
-import java.util.Set;
-import java.util.ArrayList;
 
 public class FpvDroneEntity extends Entity implements GeoEntity {
     public static final String PLAYER_REMOTE_TAG = "fullfud_fpv_remote";
@@ -201,6 +197,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     private long lastSignalCalcNanos;
     
     private ChunkPos lastSentViewCenter;
+    private int viewPointResyncCooldown;
     
     private int lerpSteps;
     private double lerpX;
@@ -477,8 +474,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             }
             List<Entity> collisions = level().getEntities(this, getBoundingBox().inflate(0.2D), e -> !e.isSpectator() && e.isPickable());
             for (Entity entity : collisions) {
-                final PlayerDecoyEntity decoy = PlayerDecoyManager.getDecoyByDrone(this.getUUID());
-                if (decoy != null && entity == decoy) continue;
                 if (entity instanceof ServerPlayer sp && entityData.get(DATA_CONTROLLER).map(sp.getUUID()::equals).orElse(false)) continue;
                 if (isExplosivePreset() && level() instanceof ServerLevel serverLevel) {
                     DroneExplosionEffects.applyDirectImpactVehicleDamage(serverLevel, this, controller, entity);
@@ -942,8 +937,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
                 endRemoteControl(controller);
             } else if (entityData.get(DATA_CONTROLLER).isPresent() || session != null) {
                 endRemoteControl(null);
-            } else {
-                PlayerDecoyManager.removeDecoyByDrone(getUUID());
             }
             releaseChunkTicket();
         }
@@ -977,8 +970,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             endRemoteControl(controller);
         } else if (entityData.get(DATA_CONTROLLER).isPresent() || session != null) {
             endRemoteControl(null);
-        } else {
-            PlayerDecoyManager.removeDecoyByDrone(getUUID());
         }
     }
 
@@ -1240,8 +1231,9 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         session = new ControlSession(player.level().dimension(), player.position(), player.getYRot(), player.getXRot(), player.gameMode.getGameModeForPlayer());
         syncRemoteActiveState();
         writeRemoteTag(player);
+        RemoteControlFailsafe.restoreLegacyRemotePlayerState(player);
         RemotePlayerProtection.touch(player, this, REMOTE_PROTECTION_RADIUS);
-        PlayerDecoyManager.createDecoy(player, this);
+        setViewPoint(player, this);
         syncRemoteController(player);
         lastSentViewCenter = null;
         syncViewCenter(player);
@@ -1270,11 +1262,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         final UUID controllerId = entityData.get(DATA_CONTROLLER).orElse(null);
         final ServerPlayer controlling = player != null ? player : resolvePlayer(controllerId);
         final ControlSession endedSession = session;
-        if (controllerId != null) {
-            PlayerDecoyManager.removeDecoy(controllerId);
-        } else {
-            PlayerDecoyManager.removeDecoyByDrone(getUUID());
-        }
         if (controlling != null) {
             restoreRemoteController(controlling, endedSession);
             clearRemoteTag(controlling);
@@ -1314,11 +1301,30 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         clearViewPoint(player);
     }
 
+    private static void setViewPoint(final ServerPlayer player, final Entity entity) {
+        if (player == null || entity == null || !(player instanceof LatticeServerPlayer lattice)) {
+            return;
+        }
+        if (entity instanceof dev.lazurite.lattice.api.point.ViewPoint viewPoint) {
+            lattice.setViewPoint(viewPoint);
+        }
+        lattice.setCameraWithoutViewPoint(entity);
+    }
+
     private static void clearViewPoint(final ServerPlayer player) {
         if (player == null) {
             return;
         }
-        player.setCamera(player);
+        if (player instanceof LatticeServerPlayer lattice) {
+            lattice.removeViewPoint();
+            lattice.setCameraWithoutViewPoint(player);
+            if (player instanceof dev.lazurite.lattice.api.point.ViewPoint viewPoint) {
+                lattice.setViewPoint(viewPoint);
+            }
+            RemoteControlFailsafe.ensureLatticePlayerRegistered(player);
+        } else {
+            player.setCamera(player);
+        }
     }
 
     private void syncViewCenter(final ServerPlayer player) {
@@ -1326,9 +1332,13 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             return;
         }
         final ChunkPos chunkPos = this.chunkPosition();
-        if (lastSentViewCenter == null || !lastSentViewCenter.equals(chunkPos)) {
+        final boolean centerChanged = lastSentViewCenter == null || !lastSentViewCenter.equals(chunkPos);
+        if (centerChanged) {
             player.connection.send(new ClientboundSetChunkCacheCenterPacket(chunkPos.x, chunkPos.z));
             lastSentViewCenter = chunkPos;
+        }
+        if (centerChanged || (tickCount % 20 == 0)) {
+            RemoteControlFailsafe.forceChunkTracking(player);
         }
     }
 
@@ -1339,30 +1349,28 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         final ChunkPos chunkPos = player.chunkPosition();
         player.connection.send(new ClientboundSetChunkCacheCenterPacket(chunkPos.x, chunkPos.z));
         lastSentViewCenter = null;
+        RemoteControlFailsafe.resetViewpointChunksToPlayer(player);
+        RemoteControlFailsafe.forceChunkTracking(player);
+        RemoteControlFailsafe.forceChunkRefresh(player);
     }
 
     private void syncRemoteController(final ServerPlayer player) {
         if (player == null) {
             return;
         }
-        if (!(level() instanceof ServerLevel serverLevel)) {
+        RemotePlayerProtection.touch(player, this, REMOTE_PROTECTION_RADIUS);
+        if (!(player instanceof LatticeServerPlayer lattice)) {
             return;
         }
-        player.teleportTo(serverLevel, getX(), getY() + (double) getBbHeight() + 4.0D, getZ(), player.getYRot(), player.getXRot());
-        player.setDeltaMovement(Vec3.ZERO);
-        player.hasImpulse = false;
-        player.fallDistance = 0.0F;
-        player.setNoGravity(true);
-        player.setInvisible(true);
-        player.setSilent(true);
-        player.noPhysics = true;
-        player.hurtMarked = true;
-        RemotePlayerProtection.touch(player, this, REMOTE_PROTECTION_RADIUS);
-        syncRemotePlayerVisibility(player, true);
-        syncRemotePlayerEquipment(player, true);
-        if (this.tickCount % 20 == 0) {
-            PlayerDecoyManager.syncDecoyEquipment(player);
-            PlayerDecoyManager.syncDecoyHealth(player);
+        if (viewPointResyncCooldown > 0) {
+            viewPointResyncCooldown--;
+        }
+        final dev.lazurite.lattice.api.point.ViewPoint current = lattice.getViewPoint();
+        if (current != this && viewPointResyncCooldown <= 0) {
+            setViewPoint(player, this);
+            lastSentViewCenter = null;
+            RemoteControlFailsafe.forceChunkRefresh(player);
+            viewPointResyncCooldown = 20;
         }
     }
 
@@ -1371,13 +1379,8 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             return;
         }
         clearViewPoint(player);
+        RemoteControlFailsafe.restoreLegacyRemotePlayerState(player);
         RemotePlayerProtection.clear(player);
-        player.setInvisible(false);
-        player.setSilent(false);
-        player.setNoGravity(false);
-        player.noPhysics = false;
-        syncRemotePlayerVisibility(player, false);
-        syncRemotePlayerEquipment(player, false);
         final MinecraftServer server = player.getServer();
         final ServerLevel targetLevel = server != null ? server.getLevel(controlSession.dimension()) : player.serverLevel();
         if (targetLevel != null) {
@@ -1396,13 +1399,8 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         }
 
         clearViewPoint(player);
+        RemoteControlFailsafe.restoreLegacyRemotePlayerState(player);
         RemotePlayerProtection.clear(player);
-        player.setInvisible(false);
-        player.setSilent(false);
-        player.setNoGravity(false);
-        player.noPhysics = false;
-        syncRemotePlayerVisibility(player, false);
-        syncRemotePlayerEquipment(player, false);
         if (player.getServer() != null && tag.contains(PLAYER_TAG_ORIGIN_DIM, Tag.TAG_STRING)) {
             final ResourceLocation dimensionId = ResourceLocation.tryParse(tag.getString(PLAYER_TAG_ORIGIN_DIM));
             final ServerLevel targetLevel = dimensionId != null ? player.getServer().getLevel(ResourceKey.create(Registries.DIMENSION, dimensionId)) : null;
@@ -1420,40 +1418,9 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         }
         final ChunkPos chunkPos = player.chunkPosition();
         player.connection.send(new ClientboundSetChunkCacheCenterPacket(chunkPos.x, chunkPos.z));
-    }
-
-    private static void syncRemotePlayerVisibility(final ServerPlayer player, final boolean hidden) {
-        if (player == null || !(player.level() instanceof ServerLevel serverLevel)) {
-            return;
-        }
-        for (final ServerPlayer viewer : serverLevel.players()) {
-            if (viewer == player) {
-                continue;
-            }
-            if (hidden) {
-                viewer.connection.send(new ClientboundRemoveEntitiesPacket(player.getId()));
-            } else {
-                viewer.connection.send(player.getAddEntityPacket());
-            }
-        }
-    }
-
-    private static void syncRemotePlayerEquipment(final ServerPlayer player, final boolean hidden) {
-        if (player == null || !(player.level() instanceof ServerLevel serverLevel)) {
-            return;
-        }
-        final List<Pair<EquipmentSlot, ItemStack>> equipment = new ArrayList<>();
-        for (final EquipmentSlot slot : EquipmentSlot.values()) {
-            final ItemStack stack = hidden ? ItemStack.EMPTY : player.getItemBySlot(slot).copy();
-            equipment.add(Pair.of(slot, stack));
-        }
-        final ClientboundSetEquipmentPacket packet = new ClientboundSetEquipmentPacket(player.getId(), equipment);
-        for (final ServerPlayer viewer : serverLevel.players()) {
-            if (viewer == player) {
-                continue;
-            }
-            viewer.connection.send(packet);
-        }
+        RemoteControlFailsafe.resetViewpointChunksToPlayer(player);
+        RemoteControlFailsafe.forceChunkTracking(player);
+        RemoteControlFailsafe.forceChunkRefresh(player);
     }
     
     private boolean isSignalLostFor(final ServerPlayer p) {
@@ -1493,7 +1460,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         if (!entityData.get(DATA_CONTROLLER).map(playerId::equals).orElse(false)) {
             return;
         }
-        PlayerDecoyManager.removeDecoy(playerId);
         endRemoteControl(null);
     }
 

@@ -1,12 +1,9 @@
 pluginManagement {
     repositories {
         maven { url = "https://maven.minecraftforge.net" }
+        maven { url = "https://repo.spongepowered.org/repository/maven-public/" }
         gradlePluginPortal()
-        mavenCentral()
     }
 }
 
-rootProject.name = 'Shadedwar'
-
-include("lattice")
-project(":lattice").projectDir = file("lattice")
+rootProject.name = 'lattice'

@@ -41,7 +41,10 @@ gradle.taskGraph.whenReady { graph ->
             println("[FULLFUD] buildNumberFileContents=" + buildNumberFile.getText("UTF-8").replace("\r", "\\r").replace("\n", "\\n"))
         }
     }
-    if (!graph.allTasks.any { bumpTaskNames.contains(it.name) }) {
+    def requestedRootBump = gradle.startParameter.taskNames
+        .collect { it.startsWith(":") ? it : ":${it}" }
+        .any { path -> bumpTaskNames.any { name -> path == ":${name}" } }
+    if (!requestedRootBump) {
         if (debugVersion) {
             println("[FULLFUD] build number not bumped (no bump tasks present)")
         }
@@ -109,9 +112,15 @@ repositories {
     }
 }
 
+def latticeVersion = "3.0.0"
+def latticeDevJar = files("lattice/build/libs/lattice-${latticeVersion}.jar")
+def latticeReobfJar = files("lattice/build/reobfJar/output.jar")
+
 dependencies {
     minecraft "net.minecraftforge:forge:1.20.1-47.1.0"
     implementation fg.deobf("software.bernie.geckolib:geckolib-forge-1.20.1:4.3.1")
+    compileOnly latticeDevJar
+    runtimeOnly latticeDevJar
     annotationProcessor "org.spongepowered:mixin:0.8.5:processor"
 }
 
@@ -126,13 +135,26 @@ tasks.withType(JavaCompile).configureEach {
     options.release = 17
 }
 
+tasks.named("compileJava") {
+    dependsOn(":lattice:jar")
+}
+
+tasks.matching { it.name in ["runClient", "runServer", "runData"] }.configureEach {
+    dependsOn(":lattice:jar")
+}
+
 mixin {
     add sourceSets.main, "mixins.fullfud.refmap.json"
     config "mixins.fullfud.json"
 }
 
 jar {
+    dependsOn(":lattice:reobfJar")
     archiveVersion.set(providers.provider { project.version.toString() })
+    from(latticeReobfJar) {
+        into "META-INF/jarjar"
+        rename { "lattice-${latticeVersion}.jar" }
+    }
     manifest {
         attributes([
             "Specification-Title": "shadedwar",

@@ -33,3 +33,10 @@ mandatory=true
 versionRange="[4.3.1,)"
 ordering="NONE"
 side="BOTH"
+
+[[dependencies.fullfud]]
+modId="lattice"
+mandatory=true
+versionRange="[3.0.0,)"
+ordering="NONE"
+side="BOTH"

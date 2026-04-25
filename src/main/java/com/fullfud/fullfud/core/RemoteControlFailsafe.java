@@ -4,16 +4,26 @@ import com.fullfud.fullfud.FullfudMod;
 import com.fullfud.fullfud.common.entity.FpvDroneEntity;
 import com.fullfud.fullfud.common.entity.ShahedDroneEntity;
 import com.fullfud.fullfud.common.menu.ShahedMonitorMenu;
+import dev.lazurite.lattice.impl.api.level.InternalLatticeServerLevel;
+import dev.lazurite.lattice.impl.api.player.InternalLatticeServerPlayer;
+import com.mojang.datafixers.util.Pair;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.protocol.game.ClientboundSetEquipmentPacket;
 import net.minecraft.server.level.ChunkMap;
 import net.minecraft.server.level.ServerChunkCache;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
+import net.minecraft.world.entity.EquipmentSlot;
+import net.minecraft.world.item.ItemStack;
+import net.minecraft.world.level.ChunkPos;
 import net.minecraftforge.event.TickEvent;
 import net.minecraftforge.event.entity.player.PlayerEvent;
 import net.minecraftforge.eventbus.api.SubscribeEvent;
 import net.minecraftforge.fml.common.Mod;
+
+import java.util.ArrayList;
+import java.util.List;
 
 @Mod.EventBusSubscriber(modid = FullfudMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
 public final class RemoteControlFailsafe {
@@ -37,6 +47,7 @@ public final class RemoteControlFailsafe {
         if (root.contains(FpvDroneEntity.PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
             final CompoundTag tag = root.getCompound(FpvDroneEntity.PLAYER_REMOTE_TAG);
             if (FpvDroneEntity.isRemoteControlActive(player.getServer(), player.getUUID(), tag)) {
+                clearLegacyRemotePlayerFlags(player);
                 RemotePlayerProtection.touch(player);
                 forceChunkTracking(player);
             } else {
@@ -52,6 +63,7 @@ public final class RemoteControlFailsafe {
                 && menu.getDroneId() != null
                 && menu.getDroneId().equals(tag.getUUID("Drone"));
             if (active) {
+                clearLegacyRemotePlayerFlags(player);
                 RemotePlayerProtection.touch(player);
                 forceChunkTracking(player);
             } else {
@@ -114,6 +126,69 @@ public final class RemoteControlFailsafe {
             }
         } catch (Throwable ignored) {
             // Best-effort: avoid crashing if reflective access fails.
+        }
+    }
+
+    public static void resetViewpointChunksToPlayer(final ServerPlayer player) {
+        if (!(player instanceof InternalLatticeServerPlayer lattice)) {
+            return;
+        }
+        final ChunkPos pos = player.chunkPosition();
+        final var viewWrapper = lattice.getViewpointChunkPosSupplierWrapper();
+        if (viewWrapper != null) {
+            viewWrapper.setLastChunkPos(pos);
+            viewWrapper.setLastLastChunkPos(pos);
+        }
+        final var playerWrapper = lattice.getChunkPosSupplierWrapper();
+        if (playerWrapper != null) {
+            playerWrapper.setLastChunkPos(pos);
+            playerWrapper.setLastLastChunkPos(pos);
+        }
+    }
+
+    public static void ensureLatticePlayerRegistered(final ServerPlayer player) {
+        if (player == null || !(player.level() instanceof InternalLatticeServerLevel latticeLevel)) {
+            return;
+        }
+        latticeLevel.registerPlayer(player);
+        latticeLevel.unbind(player);
+    }
+
+    public static void restoreLegacyRemotePlayerState(final ServerPlayer player) {
+        restoreLegacyRemotePlayerState(player, true);
+    }
+
+    public static void clearLegacyRemotePlayerFlags(final ServerPlayer player) {
+        restoreLegacyRemotePlayerState(player, false);
+    }
+
+    private static void restoreLegacyRemotePlayerState(final ServerPlayer player, final boolean syncToViewers) {
+        if (player == null) {
+            return;
+        }
+        player.setInvisible(false);
+        player.setSilent(false);
+        player.setNoGravity(false);
+        player.noPhysics = false;
+        player.fallDistance = 0.0F;
+        if (!syncToViewers) {
+            return;
+        }
+        if (!(player.level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        final List<Pair<EquipmentSlot, ItemStack>> equipment = new ArrayList<>();
+        for (final EquipmentSlot slot : EquipmentSlot.values()) {
+            equipment.add(Pair.of(slot, player.getItemBySlot(slot).copy()));
+        }
+        final ClientboundSetEquipmentPacket equipmentPacket = new ClientboundSetEquipmentPacket(player.getId(), equipment);
+        for (final ServerPlayer viewer : serverLevel.players()) {
+            if (viewer == player) {
+                continue;
+            }
+            viewer.connection.send(player.getAddEntityPacket());
+            viewer.connection.send(equipmentPacket);
         }
     }
 
