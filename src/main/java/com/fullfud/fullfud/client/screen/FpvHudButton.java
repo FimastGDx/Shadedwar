@@ -1,6 +1,7 @@
 package com.fullfud.fullfud.client.screen;
 
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import net.minecraft.client.gui.narration.NarrationElementOutput;
@@ -41,6 +42,7 @@ public class FpvHudButton extends AbstractWidget {
         final int y1 = getY();
         final int x2 = x1 + width;
         final int y2 = y1 + height;
+        final Font font = Minecraft.getInstance().font;
         int fill = FpvHudUi.PANEL_FILL;
         int border = FpvHudUi.BORDER;
         int text = FpvHudUi.TEXT;
@@ -62,7 +64,7 @@ public class FpvHudButton extends AbstractWidget {
         graphics.fill(x1, y2 - 1, x2, y2, border);
         graphics.fill(x1, y1, x1 + 1, y2, border);
         graphics.fill(x2 - 1, y1, x2, y2, border);
-        graphics.drawCenteredString(Minecraft.getInstance().font, getMessage(), x1 + width / 2, y1 + (height - 8) / 2, text);
+        graphics.drawCenteredString(font, FpvHudUi.fitText(font, getMessage(), width - 10), x1 + width / 2, y1 + (height - 8) / 2, text);
     }
 
     @Override

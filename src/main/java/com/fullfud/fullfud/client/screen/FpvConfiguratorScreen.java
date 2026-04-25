@@ -17,8 +17,17 @@ import java.util.UUID;
 
 @OnlyIn(Dist.CLIENT)
 public class FpvConfiguratorScreen extends Screen {
-    private static final int CHART_WIDTH = 170;
-    private static final int CHART_HEIGHT = 120;
+    private static final int MAX_CONTENT_WIDTH = 760;
+    private static final int SCREEN_MARGIN = 24;
+    private static final int PANEL_TOP = 44;
+    private static final int PANEL_PADDING = 14;
+    private static final int COLUMN_GAP = 16;
+    private static final int TOP_PANEL_HEIGHT = 330;
+    private static final int RIGHT_PANEL_HEIGHT = 268;
+    private static final int PRESET_PANEL_HEIGHT = 54;
+    private static final int CHART_HEIGHT = 128;
+    private static final int ROW_HEIGHT = 20;
+    private static final int ROW_GAP = 8;
 
     private final UUID droneId;
     private final FpvDroneConfig workingConfig;
@@ -39,30 +48,34 @@ public class FpvConfiguratorScreen extends Screen {
 
     @Override
     protected void init() {
-        final int left = width / 2 - 180;
-        final int top = 48;
-        final int right = left + 200;
+        final Layout layout = layout();
+        final int left = layout.leftInnerX();
+        final int right = layout.rightInnerX();
+        final int innerWidth = layout.innerWidth();
+        final int tabGap = 6;
+        final int tabWidth = (innerWidth - tabGap * 2) / 3;
+        final int tabY = layout.top() + 32;
 
-        yawButton = addRenderableWidget(new FpvHudButton(left, top, 56, 20, Component.translatable("screen.fullfud.fpv_configurator.rates.yaw"), () -> selectedAxis = FpvDroneConfig.CHANNEL_YAW));
-        pitchButton = addRenderableWidget(new FpvHudButton(left + 60, top, 56, 20, Component.translatable("screen.fullfud.fpv_configurator.rates.pitch"), () -> selectedAxis = FpvDroneConfig.CHANNEL_PITCH));
-        rollButton = addRenderableWidget(new FpvHudButton(left + 120, top, 56, 20, Component.translatable("screen.fullfud.fpv_configurator.rates.roll"), () -> selectedAxis = FpvDroneConfig.CHANNEL_ROLL));
+        yawButton = addRenderableWidget(new FpvHudButton(left, tabY, tabWidth, ROW_HEIGHT, Component.translatable("screen.fullfud.fpv_configurator.rates.yaw"), () -> selectedAxis = FpvDroneConfig.CHANNEL_YAW));
+        pitchButton = addRenderableWidget(new FpvHudButton(left + tabWidth + tabGap, tabY, tabWidth, ROW_HEIGHT, Component.translatable("screen.fullfud.fpv_configurator.rates.pitch"), () -> selectedAxis = FpvDroneConfig.CHANNEL_PITCH));
+        rollButton = addRenderableWidget(new FpvHudButton(left + (tabWidth + tabGap) * 2, tabY, innerWidth - (tabWidth + tabGap) * 2, ROW_HEIGHT, Component.translatable("screen.fullfud.fpv_configurator.rates.roll"), () -> selectedAxis = FpvDroneConfig.CHANNEL_ROLL));
 
         addRenderableWidget(new AxisSlider(
-            left, top + 34, 176, 20,
+            left, layout.top() + 66, innerWidth, ROW_HEIGHT,
             "screen.fullfud.fpv_configurator.rate",
             0.0F, 2.55F,
             workingConfig::getRcRate,
             workingConfig::setRcRate
         ));
         addRenderableWidget(new AxisSlider(
-            left, top + 60, 176, 20,
+            left, layout.top() + 66 + ROW_HEIGHT + ROW_GAP, innerWidth, ROW_HEIGHT,
             "screen.fullfud.fpv_configurator.super",
             0.0F, 1.0F,
             workingConfig::getSuperRate,
             workingConfig::setSuperRate
         ));
         addRenderableWidget(new AxisSlider(
-            left, top + 86, 176, 20,
+            left, layout.top() + 66 + (ROW_HEIGHT + ROW_GAP) * 2, innerWidth, ROW_HEIGHT,
             "screen.fullfud.fpv_configurator.expo",
             0.0F, 1.0F,
             workingConfig::getExpo,
@@ -70,48 +83,48 @@ public class FpvConfiguratorScreen extends Screen {
         ));
 
         addRenderableWidget(new PhysicsSlider(
-            right, top + 14, 176, 20,
+            right, layout.top() + 36, innerWidth, ROW_HEIGHT,
             "screen.fullfud.fpv_configurator.motor_kv",
             500.0F, 30000.0F,
             workingConfig::getMotorKv,
             workingConfig::setMotorKv
         ));
         addRenderableWidget(new PhysicsSlider(
-            right, top + 40, 176, 20,
+            right, layout.top() + 36 + ROW_HEIGHT + ROW_GAP, innerWidth, ROW_HEIGHT,
             "screen.fullfud.fpv_configurator.prop_diameter",
             1.0F, 12.0F,
             workingConfig::getPropDiameterInch,
             workingConfig::setPropDiameterInch
         ));
         addRenderableWidget(new PhysicsSlider(
-            right, top + 66, 176, 20,
+            right, layout.top() + 36 + (ROW_HEIGHT + ROW_GAP) * 2, innerWidth, ROW_HEIGHT,
             "screen.fullfud.fpv_configurator.prop_pitch",
             0.8F, 8.0F,
             workingConfig::getPropPitchInch,
             workingConfig::setPropPitchInch
         ));
         addRenderableWidget(new PhysicsSlider(
-            right, top + 92, 176, 20,
+            right, layout.top() + 36 + (ROW_HEIGHT + ROW_GAP) * 3, innerWidth, ROW_HEIGHT,
             "screen.fullfud.fpv_configurator.drag",
             0.5F, 2.0F,
             workingConfig::getDragCoefficient,
             workingConfig::setDragCoefficient
         ));
         addRenderableWidget(new PhysicsSlider(
-            right, top + 118, 176, 20,
+            right, layout.top() + 36 + (ROW_HEIGHT + ROW_GAP) * 4, innerWidth, ROW_HEIGHT,
             "screen.fullfud.fpv_configurator.thrust",
             0.5F, 2.0F,
             workingConfig::getThrustMultiplier,
             workingConfig::setThrustMultiplier
         ));
 
-        mode3dButton = addRenderableWidget(new FpvHudButton(right, top + 146, 176, 20, Component.empty(), () -> {
+        mode3dButton = addRenderableWidget(new FpvHudButton(right, layout.top() + 180, innerWidth, ROW_HEIGHT, Component.empty(), () -> {
             workingConfig.setFlightMode3d(!workingConfig.isFlightMode3d());
             dirty = true;
             updateMode3dLabel();
         }));
 
-        droneNameField = addRenderableWidget(new EditBox(font, right + 6, top + 190, 164, 14, Component.translatable("screen.fullfud.fpv_configurator.drone_name")));
+        droneNameField = addRenderableWidget(new EditBox(font, right + 8, layout.nameFieldY() + 5, innerWidth - 16, 14, Component.translatable("screen.fullfud.fpv_configurator.drone_name")));
         droneNameField.setMaxLength(20);
         droneNameField.setValue(workingConfig.getDroneName());
         droneNameField.setBordered(false);
@@ -122,23 +135,27 @@ public class FpvConfiguratorScreen extends Screen {
             dirty = true;
         });
 
-        addRenderableWidget(new FpvHudButton(left, height - 54, 84, 20, Component.translatable("screen.fullfud.fpv_configurator.turn_preset.slow"), () -> {
+        final int presetX = layout.presetInnerX();
+        final int presetY = layout.presetButtonY();
+        final int presetWidth = layout.presetButtonWidth();
+        final int presetGap = layout.presetGap();
+        addRenderableWidget(new FpvHudButton(presetX, presetY, presetWidth, ROW_HEIGHT, Component.translatable("screen.fullfud.fpv_configurator.turn_preset.slow"), () -> {
             workingConfig.applyTurnPresetSlow();
             dirty = true;
         }));
-        addRenderableWidget(new FpvHudButton(left + 92, height - 54, 84, 20, Component.translatable("screen.fullfud.fpv_configurator.turn_preset.balanced"), () -> {
+        addRenderableWidget(new FpvHudButton(presetX + presetWidth + presetGap, presetY, presetWidth, ROW_HEIGHT, Component.translatable("screen.fullfud.fpv_configurator.turn_preset.balanced"), () -> {
             workingConfig.applyTurnPresetBalanced();
             dirty = true;
         }));
-        addRenderableWidget(new FpvHudButton(right, height - 54, 84, 20, Component.translatable("screen.fullfud.fpv_configurator.turn_preset.fast"), () -> {
+        addRenderableWidget(new FpvHudButton(presetX + (presetWidth + presetGap) * 2, presetY, presetWidth, ROW_HEIGHT, Component.translatable("screen.fullfud.fpv_configurator.turn_preset.fast"), () -> {
             workingConfig.applyTurnPresetFast();
             dirty = true;
         }));
-        addRenderableWidget(new FpvHudButton(right + 92, height - 54, 84, 20, Component.translatable("screen.fullfud.fpv_configurator.turn_preset.extreme"), () -> {
+        addRenderableWidget(new FpvHudButton(presetX + (presetWidth + presetGap) * 3, presetY, layout.lastPresetButtonWidth(), ROW_HEIGHT, Component.translatable("screen.fullfud.fpv_configurator.turn_preset.extreme"), () -> {
             workingConfig.applyTurnPresetExtreme();
             dirty = true;
         }));
-        addRenderableWidget(new FpvHudButton(width / 2 - 50, height - 28, 100, 20, Component.translatable("gui.done"), this::saveAndClose));
+        addRenderableWidget(new FpvHudButton(width / 2 - 50, layout.doneY(), 100, ROW_HEIGHT, Component.translatable("gui.done"), this::saveAndClose));
 
         updateMode3dLabel();
         updateAxisButtons();
@@ -178,56 +195,51 @@ public class FpvConfiguratorScreen extends Screen {
 
     @Override
     public void render(final GuiGraphics graphics, final int mouseX, final int mouseY, final float partialTick) {
+        final Layout layout = layout();
+        final int left = layout.leftInnerX();
+        final int right = layout.rightInnerX();
+        final int innerWidth = layout.innerWidth();
+
         FpvHudUi.renderBackdrop(graphics, width, height);
-        super.render(graphics, mouseX, mouseY, partialTick);
-
-        final int left = width / 2 - 180;
-        final int right = left + 200;
-        final int top = 36;
-        final int chartX = right;
-        final int chartY = 252;
-
-        FpvHudUi.renderPanel(graphics, left - 12, top, 200, 178);
-        FpvHudUi.renderPanel(graphics, right - 12, top, 200, 206);
-        FpvHudUi.renderPanel(graphics, chartX - 12, chartY - 24, 200, CHART_HEIGHT + 54);
-        FpvHudUi.renderPanel(graphics, right, 238, 176, 20);
+        FpvHudUi.renderPanel(graphics, layout.leftPanelX(), layout.top(), layout.columnWidth(), layout.leftPanelHeight());
+        FpvHudUi.renderPanel(graphics, layout.rightPanelX(), layout.top(), layout.columnWidth(), RIGHT_PANEL_HEIGHT);
+        FpvHudUi.renderPanel(graphics, layout.leftPanelX(), layout.presetY(), layout.contentWidth(), PRESET_PANEL_HEIGHT);
+        FpvHudUi.renderPanel(graphics, right, layout.nameFieldY(), innerWidth, 22);
 
         graphics.drawCenteredString(font, title, width / 2, 16, FpvHudUi.TEXT);
         FpvHudUi.drawMutedCentered(graphics, font, Component.translatable("screen.fullfud.fpv_configurator.subtitle"), width / 2, 30);
 
-        FpvHudUi.renderSectionHeader(graphics, font, Component.translatable("screen.fullfud.fpv_configurator.rates"), left, 38, 176);
-        FpvHudUi.renderSectionHeader(graphics, font, Component.translatable("screen.fullfud.fpv_configurator.physics"), right, 38, 176);
-        graphics.drawString(font, Component.translatable("screen.fullfud.fpv_configurator.drone_name"), right, 222, FpvHudUi.TEXT);
-        graphics.drawString(font, Component.translatable("screen.fullfud.fpv_configurator.chart"), chartX, chartY - 12, FpvHudUi.TEXT);
-        graphics.drawString(font, Component.translatable("screen.fullfud.fpv_configurator.turn_presets"), left, height - 78, FpvHudUi.TEXT_ACCENT);
+        FpvHudUi.renderSectionHeader(graphics, font, Component.translatable("screen.fullfud.fpv_configurator.rates"), left, layout.top() + 12, innerWidth);
+        FpvHudUi.renderSectionHeader(graphics, font, Component.translatable("screen.fullfud.fpv_configurator.physics"), right, layout.top() + 12, innerWidth);
+        FpvHudUi.renderSectionHeader(graphics, font, Component.translatable("screen.fullfud.fpv_configurator.chart"), left, layout.chartHeaderY(), innerWidth);
+        graphics.drawString(font, Component.translatable("screen.fullfud.fpv_configurator.drone_name"), right, layout.nameLabelY(), FpvHudUi.TEXT);
+        graphics.drawString(font, Component.translatable("screen.fullfud.fpv_configurator.turn_presets"), layout.presetInnerX(), layout.presetY() + 9, FpvHudUi.TEXT_ACCENT);
 
-        renderRateChart(graphics, chartX, chartY);
+        renderRateChart(graphics, layout.chartX(), layout.chartY(), layout.chartWidth(), layout.chartHeight());
 
-        graphics.drawString(
-            font,
-            Component.translatable(
-                "screen.fullfud.fpv_configurator.live_input",
-                Component.translatable(axisTitleKey(selectedAxis)),
-                String.format(Locale.ROOT, "%.0f", FpvDroneConfig.shapeRate(
-                    1.0F,
-                    workingConfig.getRcRate(selectedAxis),
-                    workingConfig.getSuperRate(selectedAxis),
-                    workingConfig.getExpo(selectedAxis)
-                ))
-            ),
-            chartX,
-            chartY + CHART_HEIGHT + 8,
-            FpvHudUi.TEXT_MUTED
+        final Component liveInput = Component.translatable(
+            "screen.fullfud.fpv_configurator.live_input",
+            Component.translatable(axisTitleKey(selectedAxis)),
+            String.format(Locale.ROOT, "%.0f", FpvDroneConfig.shapeRate(
+                1.0F,
+                workingConfig.getRcRate(selectedAxis),
+                workingConfig.getSuperRate(selectedAxis),
+                workingConfig.getExpo(selectedAxis)
+            ))
         );
+        graphics.drawString(font, FpvHudUi.fitText(font, liveInput, innerWidth), left, layout.chartY() + layout.chartHeight() + 8, FpvHudUi.TEXT_MUTED);
+
+        super.render(graphics, mouseX, mouseY, partialTick);
     }
 
-    private void renderRateChart(final GuiGraphics graphics, final int x, final int y) {
-        graphics.fill(x, y, x + CHART_WIDTH, y + CHART_HEIGHT, 0xCC0E131A);
-        graphics.fill(x, y + CHART_HEIGHT / 2, x + CHART_WIDTH, y + CHART_HEIGHT / 2 + 1, FpvHudUi.BORDER);
-        graphics.fill(x, y, x + 1, y + CHART_HEIGHT, FpvHudUi.BORDER);
-        graphics.fill(x + CHART_WIDTH - 1, y, x + CHART_WIDTH, y + CHART_HEIGHT, FpvHudUi.BORDER);
-        graphics.fill(x, y, x + CHART_WIDTH, y + 1, FpvHudUi.BORDER);
-        graphics.fill(x, y + CHART_HEIGHT - 1, x + CHART_WIDTH, y + CHART_HEIGHT, FpvHudUi.BORDER);
+    private void renderRateChart(final GuiGraphics graphics, final int x, final int y, final int chartWidth, final int chartHeight) {
+        graphics.fill(x, y, x + chartWidth, y + chartHeight, 0xCC0E131A);
+        graphics.fill(x, y + chartHeight / 2, x + chartWidth, y + chartHeight / 2 + 1, FpvHudUi.BORDER);
+        graphics.fill(x + chartWidth / 2, y, x + chartWidth / 2 + 1, y + chartHeight, 0x3347566A);
+        graphics.fill(x, y, x + 1, y + chartHeight, FpvHudUi.BORDER);
+        graphics.fill(x + chartWidth - 1, y, x + chartWidth, y + chartHeight, FpvHudUi.BORDER);
+        graphics.fill(x, y, x + chartWidth, y + 1, FpvHudUi.BORDER);
+        graphics.fill(x, y + chartHeight - 1, x + chartWidth, y + chartHeight, FpvHudUi.BORDER);
 
         final float maxDeg = Math.max(1.0F, FpvDroneConfig.shapeRate(
             1.0F,
@@ -236,14 +248,14 @@ public class FpvConfiguratorScreen extends Screen {
             workingConfig.getExpo(selectedAxis)
         ));
         int previousX = x;
-        int previousY = mapRateToChartY(y, maxDeg, FpvDroneConfig.shapeRate(
+        int previousY = mapRateToChartY(y, chartHeight, maxDeg, FpvDroneConfig.shapeRate(
             -1.0F,
             workingConfig.getRcRate(selectedAxis),
             workingConfig.getSuperRate(selectedAxis),
             workingConfig.getExpo(selectedAxis)
         ));
-        for (int i = 1; i <= CHART_WIDTH - 1; i++) {
-            final float input = (i / (float) (CHART_WIDTH - 1)) * 2.0F - 1.0F;
+        for (int i = 1; i <= chartWidth - 1; i++) {
+            final float input = (i / (float) (chartWidth - 1)) * 2.0F - 1.0F;
             final float rate = FpvDroneConfig.shapeRate(
                 input,
                 workingConfig.getRcRate(selectedAxis),
@@ -251,16 +263,16 @@ public class FpvConfiguratorScreen extends Screen {
                 workingConfig.getExpo(selectedAxis)
             );
             final int currentX = x + i;
-            final int currentY = mapRateToChartY(y, maxDeg, rate);
+            final int currentY = mapRateToChartY(y, chartHeight, maxDeg, rate);
             drawLine(graphics, previousX, previousY, currentX, currentY, FpvHudUi.SLIDER_TRACK);
             previousX = currentX;
             previousY = currentY;
         }
     }
 
-    private int mapRateToChartY(final int chartY, final float maxDeg, final float rate) {
+    private int mapRateToChartY(final int chartY, final int chartHeight, final float maxDeg, final float rate) {
         final float normalized = 1.0F - ((rate / maxDeg) + 1.0F) * 0.5F;
-        return chartY + Math.round(Mth.clamp(normalized, 0.0F, 1.0F) * (CHART_HEIGHT - 1));
+        return chartY + Math.round(Mth.clamp(normalized, 0.0F, 1.0F) * (chartHeight - 1));
     }
 
     private void drawLine(final GuiGraphics graphics, final int x0, final int y0, final int x1, final int y1, final int color) {
@@ -303,6 +315,92 @@ public class FpvConfiguratorScreen extends Screen {
     @Override
     public boolean isPauseScreen() {
         return false;
+    }
+
+    private Layout layout() {
+        final int contentWidth = Math.min(MAX_CONTENT_WIDTH, Math.max(360, width - SCREEN_MARGIN * 2));
+        final int columnGap = Math.min(COLUMN_GAP, Math.max(8, contentWidth / 48));
+        final int columnWidth = (contentWidth - columnGap) / 2;
+        final int leftPanelX = (width - contentWidth) / 2;
+        final int rightPanelX = leftPanelX + columnWidth + columnGap;
+        final int leftPanelHeight = Math.min(TOP_PANEL_HEIGHT, Math.max(286, height - 140));
+        final int chartHeight = Math.min(CHART_HEIGHT, Math.max(84, leftPanelHeight - 202));
+        final int topPanelsBottom = PANEL_TOP + Math.max(leftPanelHeight, RIGHT_PANEL_HEIGHT);
+        final int presetY = Math.max(topPanelsBottom + 12, height - PRESET_PANEL_HEIGHT - 34);
+        final int doneY = Math.min(height - ROW_HEIGHT - 8, presetY + PRESET_PANEL_HEIGHT + 8);
+        return new Layout(contentWidth, columnWidth, leftPanelX, rightPanelX, PANEL_TOP, leftPanelHeight, chartHeight, presetY, doneY);
+    }
+
+    private record Layout(
+        int contentWidth,
+        int columnWidth,
+        int leftPanelX,
+        int rightPanelX,
+        int top,
+        int leftPanelHeight,
+        int chartHeight,
+        int presetY,
+        int doneY
+    ) {
+        private int innerWidth() {
+            return columnWidth - PANEL_PADDING * 2;
+        }
+
+        private int leftInnerX() {
+            return leftPanelX + PANEL_PADDING;
+        }
+
+        private int rightInnerX() {
+            return rightPanelX + PANEL_PADDING;
+        }
+
+        private int chartHeaderY() {
+            return top + 156;
+        }
+
+        private int chartX() {
+            return leftInnerX();
+        }
+
+        private int chartY() {
+            return top + 174;
+        }
+
+        private int chartWidth() {
+            return innerWidth();
+        }
+
+        private int nameLabelY() {
+            return top + 214;
+        }
+
+        private int nameFieldY() {
+            return top + 230;
+        }
+
+        private int presetInnerX() {
+            return leftPanelX + PANEL_PADDING;
+        }
+
+        private int presetInnerWidth() {
+            return contentWidth - PANEL_PADDING * 2;
+        }
+
+        private int presetGap() {
+            return 10;
+        }
+
+        private int presetButtonY() {
+            return presetY + 25;
+        }
+
+        private int presetButtonWidth() {
+            return (presetInnerWidth() - presetGap() * 3) / 4;
+        }
+
+        private int lastPresetButtonWidth() {
+            return presetInnerWidth() - (presetButtonWidth() + presetGap()) * 3;
+        }
     }
 
     private interface AxisFloatGetter {

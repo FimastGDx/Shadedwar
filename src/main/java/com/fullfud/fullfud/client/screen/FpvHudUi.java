@@ -100,6 +100,26 @@ public final class FpvHudUi {
         graphics.fill(knobX - 1, y + 4, knobX + 1, y + height - 4, SLIDER_KNOB);
 
         final int textColor = active ? TEXT : TEXT_MUTED;
-        graphics.drawString(Minecraft.getInstance().font, label, x + 8, y + 6, textColor);
+        final Font font = Minecraft.getInstance().font;
+        graphics.drawString(font, fitText(font, label, width - 16), x + 8, y + 6, textColor);
+    }
+
+    public static String fitText(final Font font, final Component text, final int maxWidth) {
+        return fitString(font, text == null ? "" : text.getString(), maxWidth);
+    }
+
+    public static String fitString(final Font font, final String text, final int maxWidth) {
+        if (text == null || text.isEmpty() || maxWidth <= 0) {
+            return "";
+        }
+        if (font.width(text) <= maxWidth) {
+            return text;
+        }
+        final String suffix = "...";
+        final int suffixWidth = font.width(suffix);
+        if (maxWidth <= suffixWidth) {
+            return "";
+        }
+        return font.plainSubstrByWidth(text, maxWidth - suffixWidth) + suffix;
     }
 }
