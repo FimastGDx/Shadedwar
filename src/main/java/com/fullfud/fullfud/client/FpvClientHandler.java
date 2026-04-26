@@ -1,7 +1,6 @@
 package com.fullfud.fullfud.client;
 
 import com.fullfud.fullfud.client.render.FpvDroneRenderer;
-import com.fullfud.fullfud.client.render.PlayerDecoyRenderer;
 import com.fullfud.fullfud.client.input.ControllerCalibration;
 import com.fullfud.fullfud.client.input.ControllerCalibrationStore;
 import com.fullfud.fullfud.client.input.FpvControllerInput;
@@ -44,8 +43,6 @@ import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.RenderGuiOverlayEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
-import net.minecraftforge.client.event.RenderLivingEvent;
-import net.minecraftforge.client.event.RenderPlayerEvent;
 import net.minecraftforge.client.event.ViewportEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.PlayLevelSoundEvent;
@@ -148,7 +145,6 @@ public final class FpvClientHandler {
 
     private static final ControllerCalibration controllerCalibration = new ControllerCalibration();
     private static boolean lastControllerPresent = false;
-    private static boolean localPlayerInvisible;
     private static boolean localPlayerSilent;
 
     private FpvClientHandler() {
@@ -176,8 +172,6 @@ public final class FpvClientHandler {
             MinecraftForge.EVENT_BUS.addListener(FpvClientHandler::onRenderGui);
             MinecraftForge.EVENT_BUS.addListener(FpvClientHandler::onRenderOverlay);
             MinecraftForge.EVENT_BUS.addListener(FpvClientHandler::onRenderHand);
-            MinecraftForge.EVENT_BUS.addListener(FpvClientHandler::onRenderLiving);
-            MinecraftForge.EVENT_BUS.addListener(FpvClientHandler::onRenderPlayer);
             MinecraftForge.EVENT_BUS.addListener(FpvClientHandler::onPlayLevelSoundAtEntity);
             MinecraftForge.EVENT_BUS.addListener(FpvSoundHandler::onClientTick);
         });
@@ -185,7 +179,6 @@ public final class FpvClientHandler {
 
     public static void onRegisterRenderers(final EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(FullfudRegistries.FPV_DRONE_ENTITY.get(), FpvDroneRenderer::new);
-        event.registerEntityRenderer(FullfudRegistries.PLAYER_DECOY_ENTITY.get(), PlayerDecoyRenderer::new);
         event.registerEntityRenderer(FullfudRegistries.EXPLOSION_SHRAPNEL_ENTITY.get(), context -> new ThrownItemRenderer<>(context, 0.5F, false));
     }
 
@@ -1188,34 +1181,6 @@ public final class FpvClientHandler {
         event.setCanceled(true);
     }
 
-    private static void onRenderLiving(final RenderLivingEvent.Pre<?, ?> event) {
-        final Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.player == null || event == null || event.getEntity() == null) {
-            return;
-        }
-        if (!isLocalOwnerEntity(minecraft, event.getEntity())) {
-            return;
-        }
-        if (!isOwnerFpvSessionActive(minecraft)) {
-            return;
-        }
-        event.setCanceled(true);
-    }
-
-    private static void onRenderPlayer(final RenderPlayerEvent.Pre event) {
-        final Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.player == null || event == null || event.getEntity() == null) {
-            return;
-        }
-        if (!isLocalOwnerEntity(minecraft, event.getEntity())) {
-            return;
-        }
-        if (!isOwnerFpvSessionActive(minecraft)) {
-            return;
-        }
-        event.setCanceled(true);
-    }
-
     private static void onPlayLevelSoundAtEntity(final PlayLevelSoundEvent.AtEntity event) {
         final Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.player == null || event == null || event.getEntity() == null) {
@@ -1404,29 +1369,11 @@ public final class FpvClientHandler {
         if (player == null || drone == null) {
             return;
         }
-        suppressOwnerEntityCopies(player);
         if (!localPlayerStateCaptured) {
-            localPlayerInvisible = player.isInvisible();
             localPlayerSilent = player.isSilent();
             localPlayerStateCaptured = true;
         }
-        player.setInvisible(true);
         player.setSilent(true);
-    }
-
-    private static void suppressOwnerEntityCopies(final net.minecraft.client.player.LocalPlayer player) {
-        final Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.level == null || player == null) {
-            return;
-        }
-        final UUID ownerId = player.getUUID();
-        for (final Entity entity : minecraft.level.entitiesForRendering()) {
-            if (entity == null || entity == player || !ownerId.equals(entity.getUUID())) {
-                continue;
-            }
-            entity.setInvisible(true);
-            entity.setSilent(true);
-        }
     }
 
     private static void restoreLocalPlayerState() {
@@ -1438,7 +1385,6 @@ public final class FpvClientHandler {
             localPlayerStateCaptured = false;
             return;
         }
-        minecraft.player.setInvisible(localPlayerInvisible);
         minecraft.player.setSilent(localPlayerSilent);
         localPlayerStateCaptured = false;
     }

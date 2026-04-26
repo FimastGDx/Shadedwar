@@ -1943,7 +1943,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     }
 
     private boolean shouldKeepChunksLoaded() {
-        return keepChunksLoadedWithoutPlayer || ownerUUID != null || controllingPlayer != null || armed || !viewerDistances.isEmpty();
+        return keepChunksLoadedWithoutPlayer || controllingPlayer != null || armed || !viewerDistances.isEmpty();
     }
 
     private void syncRemoteController(final ServerPlayer player) {

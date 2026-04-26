@@ -116,6 +116,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     private static final int MAX_BATTERY_TICKS = 12000;
     
     private static final int FPV_CHUNK_RADIUS = 3;
+    private static final int MAX_FPV_CHUNK_TICKET_RADIUS = 8;
     private static final int CONTROL_TIMEOUT_TICKS = 40;
     private static final int SIGNAL_CALC_INTERVAL_TICKS = 2;
     private static final int MAX_OCCLUSION_STEPS = 256;
@@ -436,7 +437,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         }
         syncRemoteActiveState();
         
-        final boolean shouldForceChunks = keepChunksLoadedWithoutPlayer || owner != null || entityData.get(DATA_CONTROLLER).isPresent();
+        final boolean shouldForceChunks = keepChunksLoadedWithoutPlayer || entityData.get(DATA_CONTROLLER).isPresent();
         if (shouldForceChunks) {
             ensureChunkTicket();
         } else {
@@ -841,7 +842,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     
     private void ensureChunkTicket() {
         if (level() instanceof ServerLevel serverLevel) {
-            final int radius = Math.max(FPV_CHUNK_RADIUS, getDistance() + 1);
+            final int radius = Mth.clamp(getDistance() + 1, FPV_CHUNK_RADIUS, MAX_FPV_CHUNK_TICKET_RADIUS);
             ChunkLoadManager.ensureChunksLoaded(serverLevel, getId(), chunkPosition(), radius);
         }
     }

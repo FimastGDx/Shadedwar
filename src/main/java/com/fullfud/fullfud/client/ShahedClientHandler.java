@@ -53,9 +53,7 @@ import net.minecraftforge.client.event.EntityRenderersEvent;
 import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
 import net.minecraftforge.client.event.RenderGuiEvent;
 import net.minecraftforge.client.event.RenderHandEvent;
-import net.minecraftforge.client.event.RenderLivingEvent;
 import net.minecraftforge.client.event.RenderLevelStageEvent;
-import net.minecraftforge.client.event.RenderPlayerEvent;
 import net.minecraftforge.client.event.ViewportEvent;
 import net.minecraftforge.common.MinecraftForge;
 import net.minecraftforge.event.PlayLevelSoundEvent;
@@ -93,7 +91,6 @@ public final class ShahedClientHandler {
     private static final Map<UUID, ShahedDroneEntity> GHOST_ENTITIES = new HashMap<>();
     private static final int GHOST_INTERPOLATION_MAX_STEPS = 10;
     private static boolean localPlayerStateCaptured;
-    private static boolean localPlayerInvisible;
     private static boolean localPlayerSilent;
     private static float monitorCameraShakePitch;
     private static float monitorCameraShakeYaw;
@@ -114,8 +111,6 @@ public final class ShahedClientHandler {
             MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderGui);
             MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onComputeCameraAngles);
             MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderHand);
-            MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderLiving);
-            MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderPlayer);
             MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onPlayLevelSoundAtEntity);
         });
     }
@@ -882,34 +877,6 @@ public final class ShahedClientHandler {
         event.setCanceled(true);
     }
 
-    private static void onRenderLiving(final RenderLivingEvent.Pre<?, ?> event) {
-        final Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.player == null || event == null || event.getEntity() == null) {
-            return;
-        }
-        if (!isLocalOwnerEntity(minecraft, event.getEntity())) {
-            return;
-        }
-        if (!isOwnerShahedSessionActive(minecraft)) {
-            return;
-        }
-        event.setCanceled(true);
-    }
-
-    private static void onRenderPlayer(final RenderPlayerEvent.Pre event) {
-        final Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.player == null || event == null || event.getEntity() == null) {
-            return;
-        }
-        if (!isLocalOwnerEntity(minecraft, event.getEntity())) {
-            return;
-        }
-        if (!isOwnerShahedSessionActive(minecraft)) {
-            return;
-        }
-        event.setCanceled(true);
-    }
-
     private static void onPlayLevelSoundAtEntity(final PlayLevelSoundEvent.AtEntity event) {
         final Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.player == null || event == null || event.getEntity() == null) {
@@ -953,29 +920,11 @@ public final class ShahedClientHandler {
         if (player == null) {
             return;
         }
-        suppressOwnerEntityCopies(player);
         if (!localPlayerStateCaptured) {
-            localPlayerInvisible = player.isInvisible();
             localPlayerSilent = player.isSilent();
             localPlayerStateCaptured = true;
         }
-        player.setInvisible(true);
         player.setSilent(true);
-    }
-
-    private static void suppressOwnerEntityCopies(final net.minecraft.client.player.LocalPlayer player) {
-        final Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.level == null || player == null) {
-            return;
-        }
-        final UUID ownerId = player.getUUID();
-        for (final Entity entity : minecraft.level.entitiesForRendering()) {
-            if (entity == null || entity == player || !ownerId.equals(entity.getUUID())) {
-                continue;
-            }
-            entity.setInvisible(true);
-            entity.setSilent(true);
-        }
     }
 
     private static void restoreLocalPlayerState() {
@@ -987,7 +936,6 @@ public final class ShahedClientHandler {
             localPlayerStateCaptured = false;
             return;
         }
-        minecraft.player.setInvisible(localPlayerInvisible);
         minecraft.player.setSilent(localPlayerSilent);
         localPlayerStateCaptured = false;
     }
