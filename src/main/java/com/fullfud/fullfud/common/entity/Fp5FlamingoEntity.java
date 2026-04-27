@@ -100,17 +100,19 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final int BOOSTER_KICK_TICKS = 12;
     private static final int BOOSTER_BURN_TICKS = 120;
     private static final int BOOSTER_DECAY_TICKS = 40;
-    private static final double BOOSTER_PEAK_SPEED = 4.6D;
-    private static final double BOOSTER_SUSTAIN_SPEED = 2.7D;
-    private static final double BOOSTER_SETTLE_SPEED = 1.05D;
+    private static final int POST_BOOST_RECOVERY_TICKS = 90;
+    private static final double BOOSTER_PEAK_SPEED = 5.2D;
+    private static final double BOOSTER_SUSTAIN_SPEED = 3.45D;
+    private static final double BOOSTER_SETTLE_SPEED = 1.85D;
     private static final double BOOSTER_ACCEL_STEP = 0.36D;
-    private static final double BOOSTER_SUSTAIN_STEP = 0.085D;
+    private static final double BOOSTER_SUSTAIN_STEP = 0.11D;
     private static final double BOOSTER_DECAY_STEP = 0.16D;
-    private static final double CLIMB_SPEED_TARGET = 1.35D;
-    private static final double CRUISE_SPEED_TARGET = 2.0D;
-    private static final double TERMINAL_SPEED_TARGET = 2.28D;
-    private static final double MIN_SPEED_STEP = 0.015D;
-    private static final double MAX_SPEED_STEP = 0.06D;
+    private static final double POST_BOOST_ACCEL_STEP = 0.05D;
+    private static final double CLIMB_SPEED_TARGET = 2.15D;
+    private static final double CRUISE_SPEED_TARGET = 2.95D;
+    private static final double TERMINAL_SPEED_TARGET = 3.65D;
+    private static final double MIN_SPEED_STEP = 0.02D;
+    private static final double MAX_SPEED_STEP = 0.09D;
     private static final float CLIMB_PITCH_RATE_LIMIT = 0.85F;
     private static final float CRUISE_PITCH_RATE_LIMIT = 0.45F;
     private static final float TERMINAL_PITCH_RATE_LIMIT = 1.2F;
@@ -816,11 +818,16 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
             final double decayProgress = (double) (launchTicks - BOOSTER_BURN_TICKS) / (double) BOOSTER_DECAY_TICKS;
             return Mth.lerp(decayProgress, BOOSTER_SUSTAIN_SPEED, BOOSTER_SETTLE_SPEED);
         }
-        return switch (flightPhase) {
+        final double phaseTarget = switch (flightPhase) {
             case FLIGHT_PHASE_CLIMB -> CLIMB_SPEED_TARGET;
-            case FLIGHT_PHASE_TERMINAL -> TERMINAL_SPEED_TARGET;
+            case FLIGHT_PHASE_TERMINAL -> resolveTerminalSpeedTarget();
             default -> CRUISE_SPEED_TARGET;
         };
+        if (launchTicks <= BOOSTER_BURN_TICKS + BOOSTER_DECAY_TICKS + POST_BOOST_RECOVERY_TICKS) {
+            final double recoveryProgress = (double) (launchTicks - BOOSTER_BURN_TICKS - BOOSTER_DECAY_TICKS) / (double) POST_BOOST_RECOVERY_TICKS;
+            return Mth.lerp(Mth.clamp(recoveryProgress, 0.0D, 1.0D), BOOSTER_SETTLE_SPEED, phaseTarget);
+        }
+        return phaseTarget;
     }
 
     private double computeSpeedStep(final double speedTarget) {
@@ -833,7 +840,15 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         if (launchTicks <= BOOSTER_BURN_TICKS + BOOSTER_DECAY_TICKS) {
             return BOOSTER_DECAY_STEP;
         }
-        return Mth.clamp(Math.abs(speedTarget - flightSpeed) * 0.08D, MIN_SPEED_STEP, MAX_SPEED_STEP);
+        if (launchTicks <= BOOSTER_BURN_TICKS + BOOSTER_DECAY_TICKS + POST_BOOST_RECOVERY_TICKS) {
+            return POST_BOOST_ACCEL_STEP;
+        }
+        return Mth.clamp(Math.abs(speedTarget - flightSpeed) * 0.09D, MIN_SPEED_STEP, MAX_SPEED_STEP);
+    }
+
+    private double resolveTerminalSpeedTarget() {
+        final double diveFactor = Mth.clamp((-getCoursePitch() - TERMINAL_DIVE_PITCH) / 25.0D, 0.0D, 1.0D);
+        return Mth.lerp(diveFactor, TERMINAL_SPEED_TARGET, TERMINAL_SPEED_TARGET + 0.55D);
     }
 
     private void spawnExhaustParticles() {
