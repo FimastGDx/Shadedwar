@@ -3,6 +3,7 @@ package dev.lazurite.lattice.impl.mixin.core.player;
 import dev.lazurite.lattice.api.level.LatticeServerLevel;
 import dev.lazurite.lattice.api.point.ViewPoint;
 import dev.lazurite.lattice.impl.Networking;
+import dev.lazurite.lattice.impl.ViewPointHelper;
 import dev.lazurite.lattice.impl.api.ChunkPosSupplierWrapper;
 import dev.lazurite.lattice.impl.api.level.InternalLatticeServerLevel;
 import dev.lazurite.lattice.impl.api.player.InternalLatticeServerPlayer;
@@ -33,19 +34,31 @@ public abstract class ServerPlayerMixin extends Player implements InternalLattic
 
     @Override
     public ViewPoint getViewPoint() {
-        return ((LatticeServerLevel) this.serverLevel()).getViewPoint((ServerPlayer) (Object) this);
+        if (this.serverLevel() instanceof LatticeServerLevel latticeServerLevel) {
+            return latticeServerLevel.getViewPoint((ServerPlayer) (Object) this);
+        }
+        return (ViewPoint) (Object) this;
     }
 
     @Override
     public void setViewPoint(final ViewPoint viewPoint) {
-        ((LatticeServerLevel) this.serverLevel()).bind((ServerPlayer) (Object) this, viewPoint);
-        Networking.sendSetViewPointPacket((ServerPlayer) (Object) this, viewPoint);
+        if (viewPoint == null) {
+            return;
+        }
+        if (this.serverLevel() instanceof LatticeServerLevel latticeServerLevel) {
+            latticeServerLevel.bind((ServerPlayer) (Object) this, viewPoint);
+            Networking.sendSetViewPointPacket((ServerPlayer) (Object) this, viewPoint);
+        }
     }
 
     @Override
     public void removeViewPoint() {
-        ((LatticeServerLevel) this.serverLevel()).unbind((ServerPlayer) (Object) this);
-        Networking.sendSetViewPointPacket((ServerPlayer) (Object) this, (ViewPoint) this);
+        if (!(this.serverLevel() instanceof LatticeServerLevel latticeServerLevel)) {
+            return;
+        }
+        final ViewPoint selfViewPoint = (ViewPoint) (Object) this;
+        latticeServerLevel.unbind((ServerPlayer) (Object) this);
+        Networking.sendSetViewPointPacket((ServerPlayer) (Object) this, selfViewPoint);
     }
 
     @Override
@@ -54,18 +67,27 @@ public abstract class ServerPlayerMixin extends Player implements InternalLattic
         this.camera = entity == null ? this : entity;
         if (entity2 != this.camera) {
             this.connection.send(new ClientboundSetCameraPacket(this.camera));
-            this.setViewPoint((ViewPoint) this.getCamera());
+            final ViewPoint cameraViewPoint = ViewPointHelper.resolveViewPoint(this.getCamera());
+            if (cameraViewPoint != null) {
+                this.setViewPoint(cameraViewPoint);
+            }
         }
     }
 
     @Override
     public ChunkPosSupplierWrapper getChunkPosSupplierWrapper() {
-        return ((InternalLatticeServerLevel) this.serverLevel()).getChunkPosSupplierWrapper((ServerPlayer) (Object) this);
+        if (this.serverLevel() instanceof InternalLatticeServerLevel internalLevel) {
+            return internalLevel.getChunkPosSupplierWrapper((ServerPlayer) (Object) this);
+        }
+        return null;
     }
 
     @Override
     public ChunkPosSupplierWrapper getViewpointChunkPosSupplierWrapper() {
-        return ((InternalLatticeServerLevel) this.serverLevel()).getViewpointChunkPosSupplierWrapper((ServerPlayer) (Object) this);
+        if (this.serverLevel() instanceof InternalLatticeServerLevel internalLevel) {
+            return internalLevel.getViewpointChunkPosSupplierWrapper((ServerPlayer) (Object) this);
+        }
+        return null;
     }
 
 }

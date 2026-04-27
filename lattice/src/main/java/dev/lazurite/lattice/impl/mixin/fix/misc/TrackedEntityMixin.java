@@ -2,6 +2,7 @@ package dev.lazurite.lattice.impl.mixin.fix.misc;
 
 import dev.lazurite.lattice.api.player.LatticePlayer;
 import dev.lazurite.lattice.api.point.ViewPoint;
+import dev.lazurite.lattice.impl.ViewPointHelper;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
@@ -29,7 +30,10 @@ public abstract class TrackedEntityMixin {
             ordinal = 1
     )
     public double updatePlayer_STORE(double e, ServerPlayer serverPlayer) {
-        final var viewPoint = ((LatticePlayer) serverPlayer).getViewPoint();
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(serverPlayer);
+        if (viewPoint == null) {
+            return e;
+        }
         final var vec3 = new Vec3(viewPoint.getX(), viewPoint.getY(), viewPoint.getZ());
         final var position = vec3.subtract(this.entity.position());
         return Math.min(e, position.x * position.x + position.z * position.z);

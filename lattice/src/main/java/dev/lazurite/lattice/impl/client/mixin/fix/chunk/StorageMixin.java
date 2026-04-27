@@ -33,7 +33,9 @@ public abstract class StorageMixin {
      */
     private boolean inPlayerRange(final int i, final int j) {
         final var localPlayer = Minecraft.getInstance().player;
-        assert localPlayer != null;
+        if (localPlayer == null) {
+            return false;
+        }
 
         ChunkPos chunkPos = ChunkPosUtil.of(localPlayer);
         return Math.abs(i - chunkPos.x) <= this.chunkRadius && Math.abs(j - chunkPos.z) <= this.chunkRadius;

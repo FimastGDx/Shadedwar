@@ -2,6 +2,7 @@ package dev.lazurite.lattice.impl.client.mixin.fix.render;
 
 import dev.lazurite.lattice.api.player.LatticePlayer;
 import dev.lazurite.lattice.api.point.ViewPoint;
+import dev.lazurite.lattice.impl.ViewPointHelper;
 import net.minecraft.client.player.LocalPlayer;
 import net.minecraft.client.renderer.LevelRenderer;
 import org.spongepowered.asm.mixin.Mixin;
@@ -25,7 +26,8 @@ public abstract class LevelRendererMixin {
             )
     )
     public final double setupRender_getX(LocalPlayer player) {
-        return ((LatticePlayer) player).getViewPoint().getX();
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(player);
+        return viewPoint != null ? viewPoint.getX() : player.getX();
     }
 
     /**
@@ -39,7 +41,8 @@ public abstract class LevelRendererMixin {
             )
     )
     public final double setupRender_getY(LocalPlayer player) {
-        return ((LatticePlayer) player).getViewPoint().getY();
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(player);
+        return viewPoint != null ? viewPoint.getY() : player.getY();
     }
 
     /**
@@ -53,7 +56,8 @@ public abstract class LevelRendererMixin {
             )
     )
     public final double setupRender_getZ(LocalPlayer player) {
-        return ((LatticePlayer) player).getViewPoint().getZ();
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(player);
+        return viewPoint != null ? viewPoint.getZ() : player.getZ();
     }
 
 }

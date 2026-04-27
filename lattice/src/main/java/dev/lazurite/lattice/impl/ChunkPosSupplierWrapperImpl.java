@@ -35,7 +35,7 @@ public final class ChunkPosSupplierWrapperImpl implements ChunkPosSupplierWrappe
     // TODO
     @Override
     public int getDistance() {
-        return Mth.clamp(this.getChunkPosSupplier().getDistance(), 0, ((IChunkMapMixin) this.getServerLevel().getChunkSource().chunkMap).getViewDistance());
+        return Mth.clamp(this.getChunkPosSupplier().getDistance(), 0, ViewPointHelper.resolveViewDistance(this.getServerLevel()));
     }
 
     @Override
@@ -76,7 +76,11 @@ public final class ChunkPosSupplierWrapperImpl implements ChunkPosSupplierWrappe
     @Override
     public boolean wasInSameChunk(final ServerPlayer serverPlayer, final boolean useLastLast) {
         if (useLastLast) {
-            return this.getLastLastChunkPos().equals(((InternalLatticeServerPlayer) serverPlayer).getChunkPosSupplierWrapper().getLastLastChunkPos());
+            final InternalLatticeServerPlayer internalPlayer = ViewPointHelper.resolveInternalServerPlayer(serverPlayer);
+            if (internalPlayer == null || internalPlayer.getChunkPosSupplierWrapper() == null) {
+                return this.getLastLastChunkPos().equals(serverPlayer.getLastSectionPos().chunk());
+            }
+            return this.getLastLastChunkPos().equals(internalPlayer.getChunkPosSupplierWrapper().getLastLastChunkPos());
         }
 
         return this.getLastChunkPos().equals(serverPlayer.getLastSectionPos().chunk());
@@ -99,5 +103,4 @@ public final class ChunkPosSupplierWrapperImpl implements ChunkPosSupplierWrappe
 
         return false;
     }
-
 }

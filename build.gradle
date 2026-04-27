@@ -117,7 +117,7 @@ def latticeDevJar = files("lattice/build/libs/lattice-${latticeVersion}.jar")
 def latticeReobfJar = files("lattice/build/reobfJar/output.jar")
 
 dependencies {
-    minecraft "net.minecraftforge:forge:1.20.1-47.1.0"
+    minecraft "net.minecraftforge:forge:1.20.1-47.4.10"
     implementation fg.deobf("software.bernie.geckolib:geckolib-forge-1.20.1:4.3.1")
     compileOnly latticeDevJar
     runtimeOnly latticeDevJar

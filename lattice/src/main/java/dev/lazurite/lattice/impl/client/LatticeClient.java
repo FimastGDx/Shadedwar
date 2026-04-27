@@ -1,6 +1,7 @@
 package dev.lazurite.lattice.impl.client;
 
 import dev.lazurite.lattice.api.point.ViewPoint;
+import dev.lazurite.lattice.impl.ViewPointHelper;
 import dev.lazurite.lattice.impl.api.player.InternalLatticeLocalPlayer;
 import dev.lazurite.lattice.impl.network.SetViewPointPacket;
 import net.minecraft.client.Minecraft;
@@ -22,8 +23,12 @@ public final class LatticeClient {
         if (!event.getLevel().isClientSide) {
             return;
         }
-        if (event.getEntity() instanceof LocalPlayer localPlayer) {
-            ((InternalLatticeLocalPlayer) localPlayer).setViewPointEntityId(localPlayer.getId());
+        if (event.getEntity() instanceof LocalPlayer localPlayer && localPlayer instanceof InternalLatticeLocalPlayer internalPlayer) {
+            internalPlayer.setViewPointEntityId(localPlayer.getId());
+            final ViewPoint selfViewPoint = ViewPointHelper.resolveViewPoint(localPlayer);
+            if (selfViewPoint != null) {
+                internalPlayer.setViewPoint(selfViewPoint);
+            }
         }
     }
 
@@ -37,7 +42,9 @@ public final class LatticeClient {
             return;
         }
 
-        final var internalLatticeLocalPlayer = (InternalLatticeLocalPlayer) localPlayer;
+        if (!(localPlayer instanceof InternalLatticeLocalPlayer internalLatticeLocalPlayer)) {
+            return;
+        }
         final var localPlayerId = localPlayer.getId();
         final var viewPointEntityId = internalLatticeLocalPlayer.getViewPointEntityId();
 
@@ -63,19 +70,25 @@ public final class LatticeClient {
         if (localPlayer == null) {
             return;
         }
-        final var internalLatticeLocalPlayer = (InternalLatticeLocalPlayer) localPlayer;
+        if (!(localPlayer instanceof InternalLatticeLocalPlayer internalLatticeLocalPlayer)) {
+            return;
+        }
 
         if (msg.isEntity()) {
             final var clientLevel = localPlayer.level();
             internalLatticeLocalPlayer.setViewPointEntityId(msg.getEntityId());
 
             final var entity = clientLevel.getEntity(msg.getEntityId());
-            if (entity != null) {
-                internalLatticeLocalPlayer.setViewPoint((ViewPoint) entity);
+            final ViewPoint entityViewPoint = ViewPointHelper.resolveViewPoint(entity);
+            if (entityViewPoint != null) {
+                internalLatticeLocalPlayer.setViewPoint(entityViewPoint);
             }
         } else {
-            // TODO handle non-entity viewPoints
             internalLatticeLocalPlayer.setViewPointEntityId(localPlayer.getId());
+            final ViewPoint selfViewPoint = ViewPointHelper.resolveViewPoint(localPlayer);
+            if (selfViewPoint != null) {
+                internalLatticeLocalPlayer.setViewPoint(selfViewPoint);
+            }
         }
     }
 }

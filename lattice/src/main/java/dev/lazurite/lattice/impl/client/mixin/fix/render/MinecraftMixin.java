@@ -3,6 +3,7 @@ package dev.lazurite.lattice.impl.client.mixin.fix.render;
 import dev.lazurite.lattice.api.player.LatticePlayer;
 import dev.lazurite.lattice.api.point.ViewPoint;
 import dev.lazurite.lattice.api.util.BlockPosUtil;
+import dev.lazurite.lattice.impl.ViewPointHelper;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.player.LocalPlayer;
 import org.spongepowered.asm.mixin.Mixin;
@@ -26,7 +27,8 @@ public abstract class MinecraftMixin {
             )
     )
     public final int tick_getBlockX(LocalPlayer player) {
-        return BlockPosUtil.posToBlockCoord(((LatticePlayer) player).getViewPoint().getX());
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(player);
+        return viewPoint != null ? BlockPosUtil.posToBlockCoord(viewPoint.getX()) : player.getBlockX();
     }
 
     /**
@@ -40,7 +42,8 @@ public abstract class MinecraftMixin {
             )
     )
     public final int tick_getBlockY(LocalPlayer player) {
-        return BlockPosUtil.posToBlockCoord(((LatticePlayer) player).getViewPoint().getY());
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(player);
+        return viewPoint != null ? BlockPosUtil.posToBlockCoord(viewPoint.getY()) : player.getBlockY();
     }
 
     /**
@@ -55,7 +58,8 @@ public abstract class MinecraftMixin {
             )
     )
     public final int tick_getBlockZ(LocalPlayer player) {
-        return BlockPosUtil.posToBlockCoord(((LatticePlayer) player).getViewPoint().getZ());
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(player);
+        return viewPoint != null ? BlockPosUtil.posToBlockCoord(viewPoint.getZ()) : player.getBlockZ();
     }
 
 }

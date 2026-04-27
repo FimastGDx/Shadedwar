@@ -1,7 +1,7 @@
 package dev.lazurite.lattice.impl.mixin.fix.misc;
 
-import dev.lazurite.lattice.api.player.LatticePlayer;
 import dev.lazurite.lattice.api.point.ViewPoint;
+import dev.lazurite.lattice.impl.ViewPointHelper;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.resources.ResourceKey;
 import net.minecraft.server.level.ServerPlayer;
@@ -24,6 +24,14 @@ public abstract class PlayerListMixin {
 
     private ServerPlayer serverPlayer;
 
+    @Inject(
+            method = "broadcast",
+            at = @At("HEAD")
+    )
+    public void broadcast_HEAD(@Nullable Player player, double d, double e, double f, double g, ResourceKey<Level> resourceKey, Packet<?> packet, CallbackInfo ci) {
+        this.serverPlayer = null;
+    }
+
     /**
      * Captures the {@link ServerPlayer} instance used in later comparisons. Not thread-safe.
      */
@@ -35,7 +43,7 @@ public abstract class PlayerListMixin {
                     shift = At.Shift.BY,
                     by = 2
             ),
-            locals = LocalCapture.CAPTURE_FAILHARD
+            locals = LocalCapture.CAPTURE_FAILSOFT
     )
     public void broadcast(@Nullable Player player, double d, double e, double f, double g, ResourceKey<Level> resourceKey, Packet<?> packet, CallbackInfo ci, int i, ServerPlayer serverPlayer) {
         this.serverPlayer = serverPlayer;
@@ -54,7 +62,8 @@ public abstract class PlayerListMixin {
             ordinal = 4
     )
     public double broadcast_STORE0(double h, @Nullable Player player, double d) {
-        return Math.min(h, d - ((LatticePlayer) this.serverPlayer).getViewPoint().getX());
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(this.serverPlayer);
+        return viewPoint != null ? Math.min(h, d - viewPoint.getX()) : h;
     }
 
     /**
@@ -70,7 +79,8 @@ public abstract class PlayerListMixin {
             ordinal = 5
     )
     public double broadcast_STORE1(double j, @Nullable Player player, double d, double e) {
-        return Math.min(j, e - ((LatticePlayer) this.serverPlayer).getViewPoint().getY());
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(this.serverPlayer);
+        return viewPoint != null ? Math.min(j, e - viewPoint.getY()) : j;
     }
 
     /**
@@ -86,7 +96,8 @@ public abstract class PlayerListMixin {
             ordinal = 6
     )
     public double broadcast_STORE2(double k, @Nullable Player player, double d, double e, double f) {
-        return Math.min(k, f - ((LatticePlayer) this.serverPlayer).getViewPoint().getZ());
+        final ViewPoint viewPoint = ViewPointHelper.resolveViewPoint(this.serverPlayer);
+        return viewPoint != null ? Math.min(k, f - viewPoint.getZ()) : k;
     }
 
 }

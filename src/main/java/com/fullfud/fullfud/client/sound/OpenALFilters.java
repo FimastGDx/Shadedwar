@@ -86,8 +86,10 @@ public final class OpenALFilters {
         final float clampedGain = clamp01(gain);
         final float clampedGainHF = clamp01(gainHF);
         handle.execute(channel -> {
-            final int sourceId = ((ChannelAccessor) channel).fullfud$getSource();
-            applyToSource(sourceId, clampedGain, clampedGainHF);
+            final int sourceId = getSourceId(channel);
+            if (sourceId != 0) {
+                applyToSource(sourceId, clampedGain, clampedGainHF);
+            }
         });
     }
 
@@ -100,8 +102,10 @@ public final class OpenALFilters {
             return;
         }
         handle.execute(channel -> {
-            final int sourceId = ((ChannelAccessor) channel).fullfud$getSource();
-            removeFromSource(sourceId);
+            final int sourceId = getSourceId(channel);
+            if (sourceId != 0) {
+                removeFromSource(sourceId);
+            }
         });
     }
 
@@ -111,10 +115,23 @@ public final class OpenALFilters {
             return null;
         }
         final SoundManager soundManager = minecraft.getSoundManager();
-        final SoundEngine soundEngine = ((SoundManagerAccessor) soundManager).fullfud$getSoundEngine();
+        if (!(soundManager instanceof SoundManagerAccessor soundManagerAccessor)) {
+            return null;
+        }
+        final SoundEngine soundEngine = soundManagerAccessor.fullfud$getSoundEngine();
+        if (!(soundEngine instanceof SoundEngineAccessor soundEngineAccessor)) {
+            return null;
+        }
         final Map<SoundInstance, ChannelAccess.ChannelHandle> instanceToChannel =
-            ((SoundEngineAccessor) soundEngine).fullfud$getInstanceToChannel();
+            soundEngineAccessor.fullfud$getInstanceToChannel();
         return instanceToChannel.get(instance);
+    }
+
+    private static int getSourceId(final Object channel) {
+        if (!(channel instanceof ChannelAccessor channelAccessor)) {
+            return 0;
+        }
+        return channelAccessor.fullfud$getSource();
     }
 
     private static float clamp01(final float value) {

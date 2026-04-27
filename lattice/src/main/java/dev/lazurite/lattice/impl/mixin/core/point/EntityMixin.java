@@ -46,10 +46,10 @@ public abstract class EntityMixin {
 
     public int vp$getDistance() {
         if (this.level().isClientSide) {
-            return ((ViewPoint) this).getDistance(); // TODO: shouldn't even matter
+            return 0;
         } else {
             final var serverLevel = (ServerLevel) this.level();
-            return ((IChunkMapMixin) ((ServerChunkCache) serverLevel.getChunkSource()).chunkMap).getViewDistance();
+            return dev.lazurite.lattice.impl.ViewPointHelper.resolveViewDistance(serverLevel);
         }
     }
 
