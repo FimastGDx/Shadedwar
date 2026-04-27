@@ -3,6 +3,7 @@ package com.fullfud.fullfud.core.network;
 import com.fullfud.fullfud.FullfudMod;
 import com.fullfud.fullfud.core.network.packet.FpvControlPacket;
 import com.fullfud.fullfud.core.network.packet.FpvReleasePacket;
+import com.fullfud.fullfud.core.network.packet.Fp5LaunchPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioLoopPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioOneShotPacket;
 import com.fullfud.fullfud.core.network.packet.OpenFpvConfiguratorPacket;
@@ -16,7 +17,7 @@ import net.minecraftforge.network.NetworkRegistry;
 import net.minecraftforge.network.simple.SimpleChannel;
 
 public final class FullfudNetwork {
-    private static final String PROTOCOL_VERSION = "4";
+    private static final String PROTOCOL_VERSION = "5";
     private static SimpleChannel channel;
     private static int packetId = 0;
 
@@ -50,6 +51,7 @@ public final class FullfudNetwork {
         channel.registerMessage(nextId(), ShahedStatusPacket.class, ShahedStatusPacket::encode, ShahedStatusPacket::decode, ShahedStatusPacket::handle);
         channel.registerMessage(nextId(), ShahedGhostUpdatePacket.class, ShahedGhostUpdatePacket::encode, ShahedGhostUpdatePacket::decode, ShahedGhostUpdatePacket::handle);
         channel.registerMessage(nextId(), ShahedLinkPacket.class, ShahedLinkPacket::encode, ShahedLinkPacket::decode, ShahedLinkPacket::handle);
+        channel.registerMessage(nextId(), Fp5LaunchPacket.class, Fp5LaunchPacket::encode, Fp5LaunchPacket::decode, Fp5LaunchPacket::handle);
         channel.registerMessage(nextId(), FpvControlPacket.class, FpvControlPacket::encode, FpvControlPacket::decode, FpvControlPacket::handle);
         channel.registerMessage(nextId(), FpvReleasePacket.class, FpvReleasePacket::encode, FpvReleasePacket::decode, FpvReleasePacket::handle);
         channel.registerMessage(nextId(), OpenFpvConfiguratorPacket.class, OpenFpvConfiguratorPacket::encode, OpenFpvConfiguratorPacket::decode, OpenFpvConfiguratorPacket::handle);

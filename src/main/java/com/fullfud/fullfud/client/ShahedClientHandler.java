@@ -1,8 +1,11 @@
 package com.fullfud.fullfud.client;
 
+import com.fullfud.fullfud.client.render.Fp5FlamingoRenderer;
 import com.fullfud.fullfud.client.render.RebEmitterRenderer;
+import com.fullfud.fullfud.client.render.Fp5LauncherRenderer;
 import com.fullfud.fullfud.client.render.ShahedDroneRenderer;
 import com.fullfud.fullfud.client.render.ShahedLauncherRenderer;
+import com.fullfud.fullfud.client.screen.Fp5MonitorScreen;
 import com.fullfud.fullfud.client.screen.ShahedMonitorScreen;
 import com.fullfud.fullfud.client.sound.DroneSoundEffects;
 import com.fullfud.fullfud.client.sound.ShahedDiveLoopSoundInstance;
@@ -106,6 +109,7 @@ public final class ShahedClientHandler {
     public static void onClientSetup(final FMLClientSetupEvent event) {
         event.enqueueWork(() -> {
             MenuScreens.register(FullfudRegistries.SHAHED_MONITOR_MENU.get(), ShahedMonitorScreen::new);
+            MenuScreens.register(FullfudRegistries.FP5_MONITOR_MENU.get(), Fp5MonitorScreen::new);
             MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onClientTick);
             MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderLevelStage);
             MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderGui);
@@ -118,6 +122,8 @@ public final class ShahedClientHandler {
     public static void onRegisterRenderers(final EntityRenderersEvent.RegisterRenderers event) {
         event.registerEntityRenderer(FullfudRegistries.SHAHED_ENTITY.get(), ShahedDroneRenderer::new);
         event.registerEntityRenderer(FullfudRegistries.SHAHED_LAUNCHER_ENTITY.get(), ShahedLauncherRenderer::new);
+        event.registerEntityRenderer(FullfudRegistries.FP5_FLAMINGO_ENTITY.get(), Fp5FlamingoRenderer::new);
+        event.registerEntityRenderer(FullfudRegistries.FP5_LAUNCHER_ENTITY.get(), Fp5LauncherRenderer::new);
         event.registerEntityRenderer(FullfudRegistries.REB_EMITTER_ENTITY.get(), RebEmitterRenderer::new);
     }
 

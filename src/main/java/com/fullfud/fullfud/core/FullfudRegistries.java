@@ -3,6 +3,8 @@ package com.fullfud.fullfud.core;
 import com.fullfud.fullfud.FullfudMod;
 import com.fullfud.fullfud.common.entity.FpvDroneEntity;
 import com.fullfud.fullfud.common.entity.ExplosionShrapnelEntity;
+import com.fullfud.fullfud.common.entity.Fp5FlamingoEntity;
+import com.fullfud.fullfud.common.entity.Fp5LauncherEntity;
 import com.fullfud.fullfud.common.entity.RebEmitterEntity;
 import com.fullfud.fullfud.common.entity.ShahedColor;
 import com.fullfud.fullfud.common.entity.ShahedDroneEntity;
@@ -10,6 +12,8 @@ import com.fullfud.fullfud.common.entity.ShahedLauncherEntity;
 import com.fullfud.fullfud.common.entity.drone.DronePreset;
 import com.fullfud.fullfud.common.item.MonitorItem;
 import com.fullfud.fullfud.common.item.FpvConfiguratorItem;
+import com.fullfud.fullfud.common.item.Fp5FlamingoItem;
+import com.fullfud.fullfud.common.item.Fp5LauncherItem;
 import com.fullfud.fullfud.common.item.RebBatteryItem;
 import com.fullfud.fullfud.common.item.RebEmitterItem;
 import com.fullfud.fullfud.common.item.ShahedLauncherItem;
@@ -17,6 +21,7 @@ import com.fullfud.fullfud.common.item.ShahedDroneItem;
 import com.fullfud.fullfud.common.item.FpvDroneItem;
 import com.fullfud.fullfud.common.item.FpvControllerItem;
 import com.fullfud.fullfud.common.item.FpvGogglesItem;
+import com.fullfud.fullfud.common.menu.Fp5MonitorMenu;
 import com.fullfud.fullfud.common.menu.ShahedMonitorMenu;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
@@ -101,6 +106,10 @@ public final class FullfudRegistries {
         new FpvDroneItem(new Item.Properties().stacksTo(1), DronePreset.STRIKE_7INCH, 4.0D, 4.0D)
     );
 
+    public static final RegistryObject<Item> FP5_FLAMINGO_ITEM = ITEMS.register("fp5flamingo", () ->
+        new Fp5FlamingoItem(new Item.Properties().stacksTo(1))
+    );
+
     public static final RegistryObject<Item> FPV_CONTROLLER_ITEM = ITEMS.register("fpv_controller", () ->
         new FpvControllerItem(new Item.Properties().stacksTo(1))
     );
@@ -111,6 +120,10 @@ public final class FullfudRegistries {
 
     public static final RegistryObject<Item> SHAHED_LAUNCHER_ITEM = ITEMS.register("shahed_launcher", () ->
         new ShahedLauncherItem(new Item.Properties().stacksTo(1))
+    );
+
+    public static final RegistryObject<Item> FP5_LAUNCHER_ITEM = ITEMS.register("launcherfp5", () ->
+        new Fp5LauncherItem(new Item.Properties().stacksTo(1))
     );
 
     public static final RegistryObject<Item> REB_EMITTER_ITEM = ITEMS.register("reb_emitter", () ->
@@ -156,6 +169,23 @@ public final class FullfudRegistries {
             .build(resource("shahed_launcher").toString())
     );
 
+    public static final RegistryObject<EntityType<Fp5LauncherEntity>> FP5_LAUNCHER_ENTITY = ENTITY_TYPES.register("launcherfp5", () ->
+        EntityType.Builder.<Fp5LauncherEntity>of(Fp5LauncherEntity::new, MobCategory.MISC)
+            .sized(1.125F * Fp5LauncherEntity.SCALE, 2.75F * Fp5LauncherEntity.SCALE)
+            .clientTrackingRange(64)
+            .updateInterval(10)
+            .build(resource("launcherfp5").toString())
+    );
+
+    public static final RegistryObject<EntityType<Fp5FlamingoEntity>> FP5_FLAMINGO_ENTITY = ENTITY_TYPES.register("fp5flamingo", () ->
+        EntityType.Builder.<Fp5FlamingoEntity>of(Fp5FlamingoEntity::new, MobCategory.MISC)
+            .sized(1.9375F * Fp5FlamingoEntity.SCALE, 1.2F * Fp5FlamingoEntity.SCALE)
+            .clientTrackingRange(2048)
+            .updateInterval(1)
+            .setShouldReceiveVelocityUpdates(true)
+            .build(resource("fp5flamingo").toString())
+    );
+
     public static final RegistryObject<EntityType<RebEmitterEntity>> REB_EMITTER_ENTITY = ENTITY_TYPES.register("reb_emitter", () ->
         EntityType.Builder.<RebEmitterEntity>of(RebEmitterEntity::new, MobCategory.MISC)
             .sized(1.0F, 1.0F)
@@ -166,6 +196,10 @@ public final class FullfudRegistries {
 
     public static final RegistryObject<MenuType<ShahedMonitorMenu>> SHAHED_MONITOR_MENU = MENU_TYPES.register("shahed_monitor", () ->
         IForgeMenuType.create(ShahedMonitorMenu::new)
+    );
+
+    public static final RegistryObject<MenuType<Fp5MonitorMenu>> FP5_MONITOR_MENU = MENU_TYPES.register("fp5_monitor", () ->
+        IForgeMenuType.create(Fp5MonitorMenu::new)
     );
 
     public static final RegistryObject<SoundEvent> SHAHED_ENGINE_START = SOUND_EVENTS.register("shahed.engine_start",

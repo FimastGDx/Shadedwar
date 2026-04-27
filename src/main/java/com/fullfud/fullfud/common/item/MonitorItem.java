@@ -1,7 +1,9 @@
 package com.fullfud.fullfud.common.item;
 
 import com.fullfud.fullfud.client.render.MonitorRenderer;
+import com.fullfud.fullfud.common.entity.Fp5FlamingoEntity;
 import com.fullfud.fullfud.common.entity.ShahedDroneEntity;
+import com.fullfud.fullfud.common.menu.Fp5MonitorMenu;
 import com.fullfud.fullfud.common.menu.ShahedMonitorMenu;
 import com.fullfud.fullfud.core.data.ShahedLinkData;
 import com.fullfud.fullfud.core.network.FullfudNetwork;
@@ -32,6 +34,7 @@ import java.util.function.Consumer;
 
 public class MonitorItem extends Item implements GeoItem {
     private static final String DRONE_TAG = "LinkedShahed";
+    private static final String FP5_TAG = "LinkedFp5Flamingo";
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
     public MonitorItem(final Properties properties) {
@@ -46,41 +49,18 @@ public class MonitorItem extends Item implements GeoItem {
         }
 
         final Optional<UUID> linkedDrone = getLinkedDrone(stack);
-        if (linkedDrone.isEmpty()) {
-            player.displayClientMessage(Component.translatable("message.fullfud.monitor.no_link"), true);
+        if (linkedDrone.isPresent()) {
+            openLinkedShahedMonitor(serverPlayer, stack, linkedDrone.get());
             return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
         }
 
-        final UUID droneId = linkedDrone.get();
-        findLinkedDrone(serverPlayer, droneId).ifPresentOrElse(drone -> {
-            if (!drone.assignOwner(serverPlayer)) {
-                player.displayClientMessage(Component.translatable("message.fullfud.monitor.in_use"), true);
-                return;
-            }
-            if (!drone.beginRemoteControl(serverPlayer)) {
-                player.displayClientMessage(Component.translatable("message.fullfud.monitor.in_use"), true);
-                return;
-            }
-            drone.addViewer(serverPlayer);
-            try {
-                NetworkHooks.openScreen(serverPlayer,
-                    new SimpleMenuProvider((containerId, inv, ply) -> new ShahedMonitorMenu(containerId, inv, droneId, drone.getId()),
-                        Component.translatable("menu.fullfud.shahed_monitor")),
-                    buf -> {
-                        buf.writeUUID(droneId);
-                        buf.writeInt(drone.getId());
-                    });
-            } catch (Throwable t) {
-                drone.removeViewer(serverPlayer);
-                drone.endRemoteControl(serverPlayer);
-                player.displayClientMessage(Component.translatable("message.fullfud.monitor.open_failed"), true);
-            }
-        }, () -> {
-            unlinkAcrossLevels(serverPlayer, droneId);
-            clearLinkedDrone(stack);
-            FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> serverPlayer), new ShahedLinkPacket(droneId, false));
-            player.displayClientMessage(Component.translatable("message.fullfud.monitor.drone_missing"), true);
-        });
+        final Optional<UUID> linkedFp5 = getLinkedFp5(stack);
+        if (linkedFp5.isPresent()) {
+            openLinkedFp5Monitor(serverPlayer, stack, linkedFp5.get());
+            return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
+        }
+
+        player.displayClientMessage(Component.translatable("message.fullfud.monitor.no_link"), true);
 
         return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
     }
@@ -94,6 +74,7 @@ public class MonitorItem extends Item implements GeoItem {
     }
 
     public static void setLinkedDrone(final ItemStack stack, final UUID droneId) {
+        clearLinkedFp5(stack);
         stack.getOrCreateTag().putUUID(DRONE_TAG, droneId);
     }
 
@@ -101,6 +82,64 @@ public class MonitorItem extends Item implements GeoItem {
         final CompoundTag tag = stack.getTag();
         if (tag != null) {
             tag.remove(DRONE_TAG);
+        }
+    }
+
+    public static Optional<UUID> getLinkedFp5(final ItemStack stack) {
+        final CompoundTag tag = stack.getTag();
+        if (tag == null || !tag.hasUUID(FP5_TAG)) {
+            return Optional.empty();
+        }
+        return Optional.of(tag.getUUID(FP5_TAG));
+    }
+
+    public static void setLinkedFp5(final ItemStack stack, final UUID flamingoId) {
+        clearLinkedDrone(stack);
+        stack.getOrCreateTag().putUUID(FP5_TAG, flamingoId);
+    }
+
+    public static void clearLinkedFp5(final ItemStack stack) {
+        final CompoundTag tag = stack.getTag();
+        if (tag != null) {
+            tag.remove(FP5_TAG);
+        }
+    }
+
+    public static void linkAndOpenFp5Monitor(final ServerPlayer player, final ItemStack stack, final Fp5FlamingoEntity flamingo) {
+        if (player == null || stack == null || flamingo == null || !flamingo.isAlive()) {
+            return;
+        }
+        setLinkedFp5(stack, flamingo.getUUID());
+        if (openFp5Monitor(player, flamingo)) {
+            player.displayClientMessage(Component.translatable("message.fullfud.monitor.fp5_linked"), true);
+        } else {
+            player.displayClientMessage(Component.translatable("message.fullfud.monitor.open_failed"), true);
+        }
+    }
+
+    public static boolean openFp5Monitor(final ServerPlayer player, final Fp5FlamingoEntity flamingo) {
+        if (player == null || flamingo == null || !flamingo.isAlive()) {
+            return false;
+        }
+        try {
+            NetworkHooks.openScreen(player,
+                new SimpleMenuProvider((containerId, inv, ply) -> new Fp5MonitorMenu(
+                    containerId,
+                    inv,
+                    flamingo.getUUID(),
+                    flamingo.getId(),
+                    flamingo.getMonitorTarget(),
+                    flamingo.isLaunched()
+                ), Component.translatable("menu.fullfud.fp5_monitor")),
+                buf -> {
+                    buf.writeUUID(flamingo.getUUID());
+                    buf.writeInt(flamingo.getId());
+                    buf.writeBlockPos(flamingo.getMonitorTarget());
+                    buf.writeBoolean(flamingo.isLaunched());
+                });
+            return true;
+        } catch (final Throwable ignored) {
+            return false;
         }
     }
 
@@ -125,6 +164,27 @@ public class MonitorItem extends Item implements GeoItem {
         return Optional.empty();
     }
 
+    private static Optional<Fp5FlamingoEntity> findLinkedFp5(final ServerPlayer player, final UUID flamingoId) {
+        final ServerLevel currentLevel = player.serverLevel();
+        final Optional<Fp5FlamingoEntity> local = Fp5FlamingoEntity.find(currentLevel, flamingoId);
+        if (local.isPresent()) {
+            return local;
+        }
+        if (player.getServer() == null) {
+            return Optional.empty();
+        }
+        for (final ServerLevel level : player.getServer().getAllLevels()) {
+            if (level == currentLevel) {
+                continue;
+            }
+            final Optional<Fp5FlamingoEntity> found = Fp5FlamingoEntity.find(level, flamingoId);
+            if (found.isPresent()) {
+                return found;
+            }
+        }
+        return Optional.empty();
+    }
+
     private static void unlinkAcrossLevels(final ServerPlayer player, final UUID droneId) {
         if (player.getServer() == null) {
             ShahedLinkData.get(player.serverLevel()).unlink(droneId);
@@ -133,6 +193,49 @@ public class MonitorItem extends Item implements GeoItem {
         for (final ServerLevel level : player.getServer().getAllLevels()) {
             ShahedLinkData.get(level).unlink(droneId);
         }
+    }
+
+    private static void openLinkedShahedMonitor(final ServerPlayer serverPlayer, final ItemStack stack, final UUID droneId) {
+        findLinkedDrone(serverPlayer, droneId).ifPresentOrElse(drone -> {
+            if (!drone.assignOwner(serverPlayer)) {
+                serverPlayer.displayClientMessage(Component.translatable("message.fullfud.monitor.in_use"), true);
+                return;
+            }
+            if (!drone.beginRemoteControl(serverPlayer)) {
+                serverPlayer.displayClientMessage(Component.translatable("message.fullfud.monitor.in_use"), true);
+                return;
+            }
+            drone.addViewer(serverPlayer);
+            try {
+                NetworkHooks.openScreen(serverPlayer,
+                    new SimpleMenuProvider((containerId, inv, ply) -> new ShahedMonitorMenu(containerId, inv, droneId, drone.getId()),
+                        Component.translatable("menu.fullfud.shahed_monitor")),
+                    buf -> {
+                        buf.writeUUID(droneId);
+                        buf.writeInt(drone.getId());
+                    });
+            } catch (final Throwable t) {
+                drone.removeViewer(serverPlayer);
+                drone.endRemoteControl(serverPlayer);
+                serverPlayer.displayClientMessage(Component.translatable("message.fullfud.monitor.open_failed"), true);
+            }
+        }, () -> {
+            unlinkAcrossLevels(serverPlayer, droneId);
+            clearLinkedDrone(stack);
+            FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> serverPlayer), new ShahedLinkPacket(droneId, false));
+            serverPlayer.displayClientMessage(Component.translatable("message.fullfud.monitor.drone_missing"), true);
+        });
+    }
+
+    private static void openLinkedFp5Monitor(final ServerPlayer serverPlayer, final ItemStack stack, final UUID flamingoId) {
+        findLinkedFp5(serverPlayer, flamingoId).ifPresentOrElse(flamingo -> {
+            if (!openFp5Monitor(serverPlayer, flamingo)) {
+                serverPlayer.displayClientMessage(Component.translatable("message.fullfud.monitor.open_failed"), true);
+            }
+        }, () -> {
+            clearLinkedFp5(stack);
+            serverPlayer.displayClientMessage(Component.translatable("message.fullfud.monitor.fp5_missing"), true);
+        });
     }
 
     @Override
