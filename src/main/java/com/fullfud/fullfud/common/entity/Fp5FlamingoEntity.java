@@ -3,6 +3,9 @@ package com.fullfud.fullfud.common.entity;
 import com.fullfud.fullfud.common.item.MonitorItem;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import net.minecraft.core.BlockPos;
+import net.minecraft.core.particles.DustParticleOptions;
+import net.minecraft.core.particles.ParticleOptions;
+import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.protocol.Packet;
 import net.minecraft.network.protocol.game.ClientGamePacketListener;
@@ -38,6 +41,7 @@ import software.bernie.geckolib.core.animation.AnimationController;
 import software.bernie.geckolib.core.animation.RawAnimation;
 import software.bernie.geckolib.core.object.PlayState;
 import software.bernie.geckolib.util.GeckoLibUtil;
+import org.joml.Vector3f;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -93,11 +97,14 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final double TARGET_ALTITUDE_BUFFER = 8.0D;
     private static final double CLIMB_ALTITUDE_RESPONSE_DISTANCE = 18.0D;
     private static final double CRUISE_ALTITUDE_RESPONSE_DISTANCE = 40.0D;
-    private static final int BOOSTER_BURN_TICKS = 14;
-    private static final int BOOSTER_DECAY_TICKS = 32;
+    private static final int BOOSTER_KICK_TICKS = 12;
+    private static final int BOOSTER_BURN_TICKS = 120;
+    private static final int BOOSTER_DECAY_TICKS = 40;
     private static final double BOOSTER_PEAK_SPEED = 4.6D;
+    private static final double BOOSTER_SUSTAIN_SPEED = 2.7D;
     private static final double BOOSTER_SETTLE_SPEED = 1.05D;
     private static final double BOOSTER_ACCEL_STEP = 0.36D;
+    private static final double BOOSTER_SUSTAIN_STEP = 0.085D;
     private static final double BOOSTER_DECAY_STEP = 0.16D;
     private static final double CLIMB_SPEED_TARGET = 1.35D;
     private static final double CRUISE_SPEED_TARGET = 2.0D;
@@ -137,6 +144,13 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final double TERMINAL_GROUND_OFFSET = 0.15D;
     private static final double TERRAIN_IMPACT_BUFFER = 0.35D;
     private static final float TNT_POWER = 4.0F;
+    private static final int GUIDANCE_DELAY_TICKS = 42;
+    private static final int GUIDANCE_RAMP_TICKS = 90;
+    private static final double EXHAUST_REAR_OFFSET = 2.45D * SCALE;
+    private static final double EXHAUST_VERTICAL_OFFSET = 0.16D * SCALE;
+    private static final double EXHAUST_SIDE_SPREAD = 0.18D * SCALE;
+    private static final Vector3f BOOSTER_FLAME_COLOR = new Vector3f(1.0F, 0.46F, 0.08F);
+    private static final DustParticleOptions BOOSTER_FLAME_PARTICLE = new DustParticleOptions(BOOSTER_FLAME_COLOR, 2.1F);
 
     private static final RawAnimation IDLE_ANIMATION = RawAnimation.begin().thenLoop("idle");
 
@@ -566,6 +580,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         final Vec3 impactTarget = resolveImpactPoint();
         final Vec3 phaseTarget = resolvePhaseTarget(impactTarget);
         final Vec3 flightMotion = computeFlightMotion(currentPos, phaseTarget, impactTarget);
+        spawnExhaustParticles();
         final HitResult blockHit = level().clip(new ClipContext(
             currentPos,
             currentPos.add(flightMotion),
@@ -778,7 +793,11 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         if (distanceFromLaunch <= INITIAL_STRAIGHT_DISTANCE) {
             return 0.0F;
         }
-        return (float) Mth.clamp((distanceFromLaunch - INITIAL_STRAIGHT_DISTANCE) / TURN_AUTHORITY_RAMP_DISTANCE, 0.0D, 1.0D);
+        final double distanceAuthority = Mth.clamp((distanceFromLaunch - INITIAL_STRAIGHT_DISTANCE) / TURN_AUTHORITY_RAMP_DISTANCE, 0.0D, 1.0D);
+        final double timeAuthority = launchTicks <= GUIDANCE_DELAY_TICKS
+            ? 0.0D
+            : Mth.clamp((double) (launchTicks - GUIDANCE_DELAY_TICKS) / (double) GUIDANCE_RAMP_TICKS, 0.0D, 1.0D);
+        return (float) (distanceAuthority * timeAuthority);
     }
 
     public float getVisualRoll(final float partialTick) {
@@ -786,12 +805,16 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     }
 
     private double resolveSpeedTarget() {
-        if (launchTicks <= BOOSTER_BURN_TICKS) {
+        if (launchTicks <= BOOSTER_KICK_TICKS) {
             return BOOSTER_PEAK_SPEED;
+        }
+        if (launchTicks <= BOOSTER_BURN_TICKS) {
+            final double sustainProgress = (double) (launchTicks - BOOSTER_KICK_TICKS) / (double) Math.max(BOOSTER_BURN_TICKS - BOOSTER_KICK_TICKS, 1);
+            return Mth.lerp(sustainProgress, BOOSTER_PEAK_SPEED, BOOSTER_SUSTAIN_SPEED);
         }
         if (launchTicks <= BOOSTER_BURN_TICKS + BOOSTER_DECAY_TICKS) {
             final double decayProgress = (double) (launchTicks - BOOSTER_BURN_TICKS) / (double) BOOSTER_DECAY_TICKS;
-            return Mth.lerp(decayProgress, BOOSTER_PEAK_SPEED, BOOSTER_SETTLE_SPEED);
+            return Mth.lerp(decayProgress, BOOSTER_SUSTAIN_SPEED, BOOSTER_SETTLE_SPEED);
         }
         return switch (flightPhase) {
             case FLIGHT_PHASE_CLIMB -> CLIMB_SPEED_TARGET;
@@ -801,13 +824,65 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     }
 
     private double computeSpeedStep(final double speedTarget) {
-        if (launchTicks <= BOOSTER_BURN_TICKS) {
+        if (launchTicks <= BOOSTER_KICK_TICKS) {
             return BOOSTER_ACCEL_STEP;
+        }
+        if (launchTicks <= BOOSTER_BURN_TICKS) {
+            return BOOSTER_SUSTAIN_STEP;
         }
         if (launchTicks <= BOOSTER_BURN_TICKS + BOOSTER_DECAY_TICKS) {
             return BOOSTER_DECAY_STEP;
         }
         return Mth.clamp(Math.abs(speedTarget - flightSpeed) * 0.08D, MIN_SPEED_STEP, MAX_SPEED_STEP);
+    }
+
+    private void spawnExhaustParticles() {
+        if (!(level() instanceof ServerLevel serverLevel)) {
+            return;
+        }
+
+        final Vec3 forward = getCourseDirection();
+        final Vec3 right = Vec3.directionFromRotation(0.0F, getYRot() + MODEL_FORWARD_YAW_OFFSET - 90.0F).normalize();
+        final Vec3 exhaustCenter = position()
+            .subtract(forward.scale(EXHAUST_REAR_OFFSET))
+            .add(0.0D, EXHAUST_VERTICAL_OFFSET, 0.0D);
+        final Vec3 exhaustVelocity = forward.scale(-0.42D).add(getDeltaMovement().scale(0.08D));
+
+        if (launchTicks <= BOOSTER_BURN_TICKS) {
+            final double rollFactor = Math.max(0.35D, Math.abs(Math.sin(Math.toRadians(bodyRoll))));
+            spawnExhaustParticleBurst(serverLevel, BOOSTER_FLAME_PARTICLE, exhaustCenter, right, exhaustVelocity, 4, 0.12D + rollFactor * 0.08D, 0.05D);
+            spawnExhaustParticleBurst(serverLevel, ParticleTypes.LARGE_SMOKE, exhaustCenter, right, exhaustVelocity.scale(0.55D), 2, 0.18D, 0.04D);
+            if (launchTicks <= BOOSTER_KICK_TICKS || (launchTicks % 3) == 0) {
+                spawnExhaustParticleBurst(serverLevel, ParticleTypes.FLAME, exhaustCenter, right, exhaustVelocity.scale(0.9D), 2, 0.1D, 0.02D);
+            }
+            return;
+        }
+
+        spawnExhaustParticleBurst(serverLevel, ParticleTypes.CAMPFIRE_SIGNAL_SMOKE, exhaustCenter, right, exhaustVelocity.scale(0.45D), 2, 0.16D, 0.03D);
+        if ((tickCount & 1) == 0) {
+            spawnExhaustParticleBurst(serverLevel, ParticleTypes.LARGE_SMOKE, exhaustCenter, right, exhaustVelocity.scale(0.25D), 1, 0.1D, 0.02D);
+        }
+    }
+
+    private void spawnExhaustParticleBurst(final ServerLevel serverLevel,
+                                           final ParticleOptions particle,
+                                           final Vec3 exhaustCenter,
+                                           final Vec3 right,
+                                           final Vec3 baseVelocity,
+                                           final int count,
+                                           final double sideSpread,
+                                           final double randomVelocitySpread) {
+        for (int i = 0; i < count; ++i) {
+            final double lateral = (random.nextDouble() - 0.5D) * 2.0D * Math.min(sideSpread, EXHAUST_SIDE_SPREAD);
+            final double vertical = (random.nextDouble() - 0.5D) * 0.12D;
+            final Vec3 spawnPos = exhaustCenter.add(right.scale(lateral)).add(0.0D, vertical, 0.0D);
+            final Vec3 velocity = baseVelocity.add(
+                (random.nextDouble() - 0.5D) * randomVelocitySpread,
+                (random.nextDouble() - 0.5D) * randomVelocitySpread,
+                (random.nextDouble() - 0.5D) * randomVelocitySpread
+            );
+            serverLevel.sendParticles(particle, spawnPos.x, spawnPos.y, spawnPos.z, 1, velocity.x, velocity.y, velocity.z, 0.0D);
+        }
     }
 
     private float getCoursePitch() {
