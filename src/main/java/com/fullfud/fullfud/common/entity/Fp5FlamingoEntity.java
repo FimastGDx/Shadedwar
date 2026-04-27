@@ -70,6 +70,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final String TAG_YAW_RATE = "YawRate";
     private static final String TAG_LAUNCH_TICKS = "LaunchTicks";
     private static final String TAG_PITCH_RATE = "PitchRate";
+    private static final String TAG_LATERAL_SLIP = "LateralSlip";
 
     private static final float HITBOX_WIDTH = 1.9375F * SCALE;
     private static final float HITBOX_LENGTH = 5.5F * SCALE;
@@ -110,14 +111,24 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final float CLIMB_BANK_LIMIT = 4.0F;
     private static final float CRUISE_BANK_LIMIT = 8.0F;
     private static final float TERMINAL_BANK_LIMIT = 12.0F;
-    private static final float BANK_RESPONSE_STEP = 0.55F;
-    private static final double BANK_LATERAL_FACTOR = 0.07D;
+    private static final float BANK_RESPONSE_STEP = 0.42F;
+    private static final double CLIMB_LATERAL_SLIP_LIMIT = 0.018D;
+    private static final double CRUISE_LATERAL_SLIP_LIMIT = 0.052D;
+    private static final double TERMINAL_LATERAL_SLIP_LIMIT = 0.032D;
+    private static final double SLIP_BUILD_STEP = 0.0028D;
+    private static final double SLIP_DECAY_STEP = 0.0042D;
     private static final double CRUISE_STEER_BLEND = 0.08D;
     private static final double TERMINAL_STEER_BLEND = 0.16D;
     private static final float MAX_CLIMB_YAW_RATE = 0.35F;
     private static final float MAX_CRUISE_YAW_RATE = 0.55F;
     private static final float MAX_TERMINAL_YAW_RATE = 0.75F;
-    private static final float YAW_RATE_RESPONSE = 0.08F;
+    private static final float CLIMB_YAW_ACCEL = 0.032F;
+    private static final float CRUISE_YAW_ACCEL = 0.046F;
+    private static final float TERMINAL_YAW_ACCEL = 0.065F;
+    private static final float CLIMB_YAW_DAMPING = 0.016F;
+    private static final float CRUISE_YAW_DAMPING = 0.022F;
+    private static final float TERMINAL_YAW_DAMPING = 0.03F;
+    private static final float YAW_MISMATCH_BRAKE = 0.06F;
     private static final double CLIMB_PHASE_THRESHOLD = 3.0D;
     private static final double TERMINAL_HORIZONTAL_THRESHOLD = 14.0D;
     private static final double TERMINAL_DISTANCE_THRESHOLD = 1.2D;
@@ -148,6 +159,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private float bodyRollO;
     private float yawRate;
     private float pitchRate;
+    private double lateralSlip;
     private int launchTicks;
     private int lerpSteps;
     private double lerpX;
@@ -212,6 +224,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         yawRate = tag.getFloat(TAG_YAW_RATE);
         launchTicks = tag.getInt(TAG_LAUNCH_TICKS);
         pitchRate = tag.getFloat(TAG_PITCH_RATE);
+        lateralSlip = tag.getDouble(TAG_LATERAL_SLIP);
 
         if (isOnLauncher()) {
             noPhysics = true;
@@ -249,6 +262,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         tag.putFloat(TAG_YAW_RATE, yawRate);
         tag.putInt(TAG_LAUNCH_TICKS, launchTicks);
         tag.putFloat(TAG_PITCH_RATE, pitchRate);
+        tag.putDouble(TAG_LATERAL_SLIP, lateralSlip);
     }
 
     @Override
@@ -407,6 +421,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         bodyRollO = 0.0F;
         yawRate = 0.0F;
         pitchRate = 0.0F;
+        lateralSlip = 0.0D;
         launchTicks = 0;
         keepMountedOnLauncher(launcher);
     }
@@ -434,6 +449,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         bodyRollO = 0.0F;
         yawRate = 0.0F;
         pitchRate = 0.0F;
+        lateralSlip = 0.0D;
         launchTicks = 0;
         final double targetGroundY = sampleSurfaceY(targetPos.getX() + 0.5D, targetPos.getZ() + 0.5D);
         flightPhase = FLIGHT_PHASE_CLIMB;
@@ -469,6 +485,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         bodyRollO = 0.0F;
         yawRate = 0.0F;
         pitchRate = 0.0F;
+        lateralSlip = 0.0D;
         launchTicks = 0;
         updateLauncherPose(launcher);
     }
@@ -538,6 +555,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
             setDeltaMovement(Vec3.ZERO);
             yawRate = 0.0F;
             pitchRate = 0.0F;
+            lateralSlip = 0.0D;
             launchTicks = 0;
             return;
         }
@@ -632,13 +650,29 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
             case FLIGHT_PHASE_TERMINAL -> MAX_TERMINAL_YAW_RATE;
             default -> MAX_CRUISE_YAW_RATE;
         };
-        final float desiredYawRate = launchTurnLocked
-            ? 0.0F
-            : (float) (Math.sin(Math.toRadians(nextRoll)) * maxYawRate * Mth.clamp(flightSpeed / CRUISE_SPEED_TARGET, 0.45D, 1.2D) * turnAuthority);
-        yawRate = (float) approachValue(yawRate, desiredYawRate, YAW_RATE_RESPONSE);
-        if (!launchTurnLocked && Math.abs(yawError) < 0.5F) {
-            yawRate = (float) approachValue(yawRate, 0.0D, YAW_RATE_RESPONSE * 0.6F);
+        final float yawAccelGain = switch (flightPhase) {
+            case FLIGHT_PHASE_CLIMB -> CLIMB_YAW_ACCEL;
+            case FLIGHT_PHASE_TERMINAL -> TERMINAL_YAW_ACCEL;
+            default -> CRUISE_YAW_ACCEL;
+        };
+        final float yawDamping = switch (flightPhase) {
+            case FLIGHT_PHASE_CLIMB -> CLIMB_YAW_DAMPING;
+            case FLIGHT_PHASE_TERMINAL -> TERMINAL_YAW_DAMPING;
+            default -> CRUISE_YAW_DAMPING;
+        };
+        if (launchTurnLocked) {
+            yawRate = (float) approachValue(yawRate, 0.0D, YAW_MISMATCH_BRAKE);
+        } else {
+            final float yawAcceleration = (float) (Math.sin(Math.toRadians(nextRoll)) * yawAccelGain * Mth.clamp(flightSpeed / CRUISE_SPEED_TARGET, 0.45D, 1.2D) * turnAuthority);
+            yawRate += yawAcceleration;
+            yawRate -= yawRate * yawDamping;
+            if (Math.abs(yawError) < 0.5F) {
+                yawRate = (float) approachValue(yawRate, 0.0D, yawDamping);
+            } else if (Math.signum(yawRate) != 0.0F && Math.signum(yawRate) != Math.signum(yawError)) {
+                yawRate = (float) approachValue(yawRate, 0.0D, YAW_MISMATCH_BRAKE);
+            }
         }
+        yawRate = Mth.clamp(yawRate, -maxYawRate, maxYawRate);
         final float nextYaw = launchTurnLocked ? launchLockedYaw : currentYaw + yawRate;
         final float pitchError = desiredPitch - currentCoursePitch;
         final float desiredPitchRate = Mth.clamp(pitchError * 0.08F, -pitchRateLimit, pitchRateLimit);
@@ -655,8 +689,18 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         flightSpeed = approachValue(flightSpeed, speedTarget, computeSpeedStep(speedTarget));
         final Vec3 forward = Vec3.directionFromRotation(nextPitch, nextYaw + MODEL_FORWARD_YAW_OFFSET);
         final Vec3 right = Vec3.directionFromRotation(0.0F, nextYaw + MODEL_FORWARD_YAW_OFFSET - 90.0F);
+        final double slipLimit = switch (flightPhase) {
+            case FLIGHT_PHASE_CLIMB -> CLIMB_LATERAL_SLIP_LIMIT;
+            case FLIGHT_PHASE_TERMINAL -> TERMINAL_LATERAL_SLIP_LIMIT;
+            default -> CRUISE_LATERAL_SLIP_LIMIT;
+        };
         final double bankRadians = Math.toRadians(nextRoll);
-        final Vec3 desiredMotion = forward.add(right.scale(Math.sin(bankRadians) * BANK_LATERAL_FACTOR)).normalize();
+        final double desiredLateralSlip = launchTurnLocked
+            ? 0.0D
+            : Mth.clamp(Math.sin(bankRadians) * slipLimit * Mth.clamp(flightSpeed / CRUISE_SPEED_TARGET, 0.45D, 1.25D) * turnAuthority, -slipLimit, slipLimit);
+        final double slipStep = Math.abs(desiredLateralSlip) > Math.abs(lateralSlip) ? SLIP_BUILD_STEP : SLIP_DECAY_STEP;
+        lateralSlip = approachValue(lateralSlip, desiredLateralSlip, slipStep);
+        final Vec3 desiredMotion = forward.add(right.scale(lateralSlip)).normalize();
         final Vec3 previousMotion = getDeltaMovement().lengthSqr() > 1.0E-6D ? getDeltaMovement().normalize() : desiredMotion;
         final double steerBlend = launchTurnLocked
             ? 1.0D
