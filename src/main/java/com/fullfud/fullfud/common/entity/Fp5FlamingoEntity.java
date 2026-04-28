@@ -151,8 +151,8 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final double EXHAUST_REAR_OFFSET = 2.45D * SCALE;
     private static final double EXHAUST_VERTICAL_OFFSET = 0.16D * SCALE;
     private static final double EXHAUST_SIDE_SPREAD = 0.18D * SCALE;
-    private static final Vector3f BOOSTER_FLAME_COLOR = new Vector3f(1.0F, 0.46F, 0.08F);
-    private static final DustParticleOptions BOOSTER_FLAME_PARTICLE = new DustParticleOptions(BOOSTER_FLAME_COLOR, 2.1F);
+    private static final Vector3f BOOSTER_SMOKE_COLOR = new Vector3f(0.96F, 0.96F, 0.96F);
+    private static final DustParticleOptions BOOSTER_SMOKE_PARTICLE = new DustParticleOptions(BOOSTER_SMOKE_COLOR, 2.5F);
 
     private static final RawAnimation IDLE_ANIMATION = RawAnimation.begin().thenLoop("idle");
 
@@ -865,17 +865,12 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
 
         if (launchTicks <= BOOSTER_BURN_TICKS) {
             final double rollFactor = Math.max(0.35D, Math.abs(Math.sin(Math.toRadians(bodyRoll))));
-            spawnExhaustParticleBurst(serverLevel, BOOSTER_FLAME_PARTICLE, exhaustCenter, right, exhaustVelocity, 4, 0.12D + rollFactor * 0.08D, 0.05D);
-            spawnExhaustParticleBurst(serverLevel, ParticleTypes.LARGE_SMOKE, exhaustCenter, right, exhaustVelocity.scale(0.55D), 2, 0.18D, 0.04D);
-            if (launchTicks <= BOOSTER_KICK_TICKS || (launchTicks % 3) == 0) {
-                spawnExhaustParticleBurst(serverLevel, ParticleTypes.FLAME, exhaustCenter, right, exhaustVelocity.scale(0.9D), 2, 0.1D, 0.02D);
+            final double plumeSpread = 0.16D + rollFactor * 0.1D;
+            spawnExhaustParticleBurst(serverLevel, BOOSTER_SMOKE_PARTICLE, exhaustCenter, right, exhaustVelocity.scale(0.85D), 6, plumeSpread, 0.05D);
+            spawnExhaustParticleBurst(serverLevel, ParticleTypes.CLOUD, exhaustCenter, right, exhaustVelocity.scale(0.62D), 4, plumeSpread + 0.06D, 0.04D);
+            if ((tickCount & 1) == 0) {
+                spawnExhaustParticleBurst(serverLevel, ParticleTypes.CLOUD, exhaustCenter, right, exhaustVelocity.scale(0.35D), 3, plumeSpread + 0.1D, 0.03D);
             }
-            return;
-        }
-
-        spawnExhaustParticleBurst(serverLevel, ParticleTypes.CAMPFIRE_SIGNAL_SMOKE, exhaustCenter, right, exhaustVelocity.scale(0.45D), 2, 0.16D, 0.03D);
-        if ((tickCount & 1) == 0) {
-            spawnExhaustParticleBurst(serverLevel, ParticleTypes.LARGE_SMOKE, exhaustCenter, right, exhaustVelocity.scale(0.25D), 1, 0.1D, 0.02D);
         }
     }
 
