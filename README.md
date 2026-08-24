@@ -161,5 +161,4 @@ Short version:
 - non-commercial servers are allowed under the license terms
 - redistribution and derivatives must keep attribution and the same license terms
 - commercial use requires explicit written permission from `fullfud`
-- `FrontlineMC` has a specific additional grant described in the license
 - third-party fonts, OSD font/glyph assets, and other imported vendor resources are not covered by the custom license and remain subject to their upstream terms
