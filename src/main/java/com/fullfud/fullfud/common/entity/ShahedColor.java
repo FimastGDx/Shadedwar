@@ -5,8 +5,8 @@ import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
 
 public enum ShahedColor {
-    WHITE(0, "white", new ResourceLocation(FullfudMod.MOD_ID, "textures/entity/shahed_136.png")),
-    BLACK(1, "black", new ResourceLocation(FullfudMod.MOD_ID, "textures/entity/shahed_136_black.png"));
+    WHITE(0, "white", ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "textures/entity/shahed_136.png")),
+    BLACK(1, "black", ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "textures/entity/shahed_136_black.png"));
 
     private final int id;
     private final String translationKey;

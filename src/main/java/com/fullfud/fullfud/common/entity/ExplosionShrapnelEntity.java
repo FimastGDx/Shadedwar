@@ -2,10 +2,9 @@ package com.fullfud.fullfud.common.entity;
 
 import com.fullfud.fullfud.core.FullfudRegistries;
 import com.fullfud.fullfud.core.SuperbWarfareCompat;
+import net.fabricmc.fabric.api.tag.convention.v1.ConventionalBlockTags;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.ParticleTypes;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.sounds.SoundSource;
 import net.minecraft.world.entity.Entity;
@@ -14,6 +13,7 @@ import net.minecraft.world.entity.item.FallingBlockEntity;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.projectile.ThrowableItemProjectile;
 import net.minecraft.world.item.Item;
+import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -21,8 +21,6 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.common.Tags;
-import net.minecraftforge.network.NetworkHooks;
 
 public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
     private static final int MAX_SPAWN_PER_EXPLOSION = 160;
@@ -35,7 +33,6 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
 
     public ExplosionShrapnelEntity(final EntityType<? extends ExplosionShrapnelEntity> type, final Level level) {
         super(type, level);
-        this.noCulling = true;
     }
 
     public ExplosionShrapnelEntity(
@@ -45,9 +42,10 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
         final double z,
         final Level level
     ) {
-        super(type, x, y, z, level);
+        // 1.21.2 moved the item onto the constructor; getDefaultItem() is still what it falls back to,
+        // so passing it explicitly keeps the rendered item the same iron nugget as before.
+        super(type, x, y, z, level, new ItemStack(Items.IRON_NUGGET));
         this.startPos = new Vec3(x, y, z);
-        this.noCulling = true;
     }
 
     public void setDamage(final float damage) {
@@ -130,7 +128,7 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
         if (level() instanceof ServerLevel serverLevel) {
             final BlockPos blockPos = result.getBlockPos();
             final BlockState blockState = serverLevel.getBlockState(blockPos);
-            if (blockState.is(Tags.Blocks.GLASS) || blockState.is(Tags.Blocks.GLASS_PANES)) {
+            if (blockState.is(ConventionalBlockTags.GLASS_BLOCKS) || blockState.is(ConventionalBlockTags.GLASS_PANES)) {
                 serverLevel.levelEvent(2001, blockPos, Block.getId(blockState));
                 serverLevel.destroyBlock(blockPos, false, this);
             }
@@ -138,11 +136,6 @@ public class ExplosionShrapnelEntity extends ThrowableItemProjectile {
         }
 
         discard();
-    }
-
-    @Override
-    public Packet<ClientGamePacketListener> getAddEntityPacket() {
-        return NetworkHooks.getEntitySpawningPacket(this);
     }
 
     private float calculateDamage() {

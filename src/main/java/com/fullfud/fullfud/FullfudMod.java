@@ -1,59 +1,54 @@
 package com.fullfud.fullfud;
 
-import com.fullfud.fullfud.client.FpvClientHandler;
-import com.fullfud.fullfud.client.ShahedClientHandler; 
+import com.fullfud.fullfud.core.ChunkLoadEvents;
+import com.fullfud.fullfud.core.DelayedTasks;
 import com.fullfud.fullfud.core.FullfudCreativeTabs;
+import com.fullfud.fullfud.core.FullfudDataComponents;
 import com.fullfud.fullfud.core.FullfudGameRules;
 import com.fullfud.fullfud.core.FullfudRegistries;
-import com.fullfud.fullfud.core.config.FullfudClientConfig;
+import com.fullfud.fullfud.core.RemoteControlFailsafe;
+import com.fullfud.fullfud.core.RemoteInteractionBlocker;
+import com.fullfud.fullfud.core.RemotePlayerProtection;
 import com.fullfud.fullfud.core.config.FullfudServerConfig;
+import com.fullfud.fullfud.core.data.PersistentData;
 import com.fullfud.fullfud.core.network.FullfudNetwork;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.fml.ModLoadingContext;
-import net.minecraftforge.fml.DistExecutor;
-import net.minecraftforge.fml.common.Mod;
-import net.minecraftforge.fml.config.ModConfig;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
-import net.minecraftforge.fml.event.lifecycle.FMLCommonSetupEvent;
-import net.minecraftforge.fml.javafmlmod.FMLJavaModLoadingContext;
-import software.bernie.geckolib.GeckoLib;
+import com.fullfud.fullfud.core.worldgen.LithiumOrePlacer;
+import net.fabricmc.api.ModInitializer;
 
-@Mod(FullfudMod.MOD_ID)
-public class FullfudMod {
+/**
+ * Common entrypoint, declared as {@code entrypoints.main} in {@code fabric.mod.json}.
+ *
+ * <p>Forge split this work between the mod constructor and {@code FMLCommonSetupEvent}; Fabric has a
+ * single {@code onInitialize()} that runs before any world exists, which is early enough for all of it.
+ * The four event registrations at the bottom used to be {@code @Mod.EventBusSubscriber} annotations
+ * found by classpath scanning — Fabric does no such scanning, so they are listed here explicitly.
+ * {@code ExplosionControl} and {@code DroneExplosionLimiter} are absent on purpose: they are now plain
+ * predicates asked by {@code mixin.ExplosionMixin} rather than listeners.
+ */
+public class FullfudMod implements ModInitializer {
     public static final String MOD_ID = "fullfud";
 
-    public FullfudMod() {
-        ModLoadingContext.get().registerConfig(ModConfig.Type.CLIENT, FullfudClientConfig.SPEC);
-        ModLoadingContext.get().registerConfig(ModConfig.Type.SERVER, FullfudServerConfig.SPEC);
+    @Override
+    public void onInitialize() {
+        FullfudServerConfig.SPEC.load();
 
-        IEventBus modEventBus = FMLJavaModLoadingContext.get().getModEventBus();
-
-        GeckoLib.initialize();
         FullfudGameRules.init();
+        PersistentData.init();
 
-        FullfudRegistries.register(modEventBus);
-        FullfudCreativeTabs.register(modEventBus);
+        FullfudDataComponents.register();
+        FullfudRegistries.register();
+        FullfudCreativeTabs.register();
 
-        modEventBus.addListener(this::onCommonSetup);
+        FullfudNetwork.init();
+        // Lattice's own payload type. Must be declared here, on the common side, because Fabric runs
+        // the main entrypoint before the client one and LatticeClient's receiver would otherwise throw.
+        dev.lazurite.lattice.impl.Networking.init();
 
-        DistExecutor.unsafeRunWhenOn(Dist.CLIENT, () -> () -> {
-            modEventBus.addListener(this::onClientSetup);
-            
-            FpvClientHandler.registerClientEvents(modEventBus);
-            ShahedClientHandler.registerClientEvents(modEventBus);
-        });
-    }
-
-    private void onCommonSetup(final FMLCommonSetupEvent event) {
-        event.enqueueWork(() -> {
-            FullfudNetwork.init();
-        });
-    }
-
-    private void onClientSetup(final FMLClientSetupEvent event) {
-        FpvClientHandler.onClientSetup(event);
-        ShahedClientHandler.onClientSetup(event);
+        ChunkLoadEvents.register();
+        DelayedTasks.register();
+        RemoteControlFailsafe.register();
+        RemotePlayerProtection.register();
+        RemoteInteractionBlocker.register();
+        LithiumOrePlacer.register();
     }
 }

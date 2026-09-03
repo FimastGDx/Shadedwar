@@ -6,6 +6,8 @@ import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
+import net.minecraft.util.Mth;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
 
 public class ShahedLauncherRenderer extends GeoEntityRenderer<ShahedLauncherEntity> {
@@ -15,11 +17,14 @@ public class ShahedLauncherRenderer extends GeoEntityRenderer<ShahedLauncherEnti
         this.shadowRadius = 0.0F;
     }
 
+    // See Fp5FlamingoRenderer#render for why the entity and the yaw are read off the renderer now.
     @Override
-    public void render(final ShahedLauncherEntity entity, final float entityYaw, final float partialTick, final PoseStack poseStack, final MultiBufferSource bufferSource, final int packedLight) {
+    public void render(final EntityRenderState renderState, final PoseStack poseStack, final MultiBufferSource bufferSource, final int packedLight) {
+        final ShahedLauncherEntity entity = this.animatable;
+        final float yaw = Mth.rotLerp(this.partialTick, entity.yRotO, entity.getYRot());
         poseStack.pushPose();
-        poseStack.mulPose(Axis.YP.rotationDegrees(180.0F - entityYaw));
-        super.render(entity, entityYaw, partialTick, poseStack, bufferSource, packedLight);
+        poseStack.mulPose(Axis.YP.rotationDegrees(180.0F - yaw));
+        super.render(renderState, poseStack, bufferSource, packedLight);
         poseStack.popPose();
     }
 }

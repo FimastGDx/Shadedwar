@@ -1,11 +1,11 @@
 package com.fullfud.fullfud.core.network.packet;
 
-import com.fullfud.fullfud.core.network.handler.ShahedNetworkHandlers;
+import com.fullfud.fullfud.core.network.FullfudNetwork;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 public record ShahedStatusPacket(UUID droneId,
                                  double x,
@@ -22,7 +22,13 @@ public record ShahedStatusPacket(UUID droneId,
                                  float angleOfAttack,
                                  float slipAngle,
                                  float fuelKg,
-                                 float airDensity) {
+                                 float airDensity) implements CustomPacketPayload {
+
+    public static final CustomPacketPayload.Type<ShahedStatusPacket> TYPE =
+        new CustomPacketPayload.Type<>(FullfudNetwork.id("shahed_status"));
+
+    public static final StreamCodec<FriendlyByteBuf, ShahedStatusPacket> STREAM_CODEC =
+        CustomPacketPayload.codec(ShahedStatusPacket::write, ShahedStatusPacket::decode);
 
     public static ShahedStatusPacket decode(final FriendlyByteBuf buffer) {
         final UUID droneId = buffer.readUUID();
@@ -61,7 +67,7 @@ public record ShahedStatusPacket(UUID droneId,
         );
     }
 
-    public void encode(final FriendlyByteBuf buffer) {
+    public void write(final FriendlyByteBuf buffer) {
         buffer.writeUUID(droneId);
         buffer.writeDouble(x);
         buffer.writeDouble(y);
@@ -80,13 +86,8 @@ public record ShahedStatusPacket(UUID droneId,
         buffer.writeFloat(airDensity);
     }
 
-    public void handle(final Supplier<NetworkEvent.Context> contextSupplier) {
-        final NetworkEvent.Context context = contextSupplier.get();
-        if (!context.getDirection().getReceptionSide().isClient()) {
-            context.setPacketHandled(true);
-            return;
-        }
-        context.enqueueWork(() -> ShahedNetworkHandlers.handleStatus(this));
-        context.setPacketHandled(true);
+    @Override
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+        return TYPE;
     }
 }

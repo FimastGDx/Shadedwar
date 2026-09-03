@@ -1,7 +1,7 @@
 package com.fullfud.fullfud.client.screen;
 
 import com.fullfud.fullfud.common.menu.Fp5MonitorMenu;
-import com.fullfud.fullfud.core.network.FullfudNetwork;
+import com.fullfud.fullfud.core.network.FullfudClientNetwork;
 import com.fullfud.fullfud.core.network.packet.Fp5LaunchPacket;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
@@ -13,10 +13,10 @@ import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.player.Inventory;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
 
-@OnlyIn(Dist.CLIENT)
+@Environment(EnvType.CLIENT)
 public class Fp5MonitorScreen extends AbstractContainerScreen<Fp5MonitorMenu> {
     private static final int PANEL_WIDTH = 272;
     private static final int PANEL_HEIGHT = 176;
@@ -91,9 +91,7 @@ public class Fp5MonitorScreen extends AbstractContainerScreen<Fp5MonitorMenu> {
     @Override
     protected void containerTick() {
         super.containerTick();
-        xField.tick();
-        yField.tick();
-        zField.tick();
+        // 1.20.2 folded EditBox's cursor blink into the render pass, so the per-field tick() is gone.
         updateLaunchButton();
     }
 
@@ -185,7 +183,7 @@ public class Fp5MonitorScreen extends AbstractContainerScreen<Fp5MonitorMenu> {
         if (targetX == null || targetY == null || targetZ == null || menu.getFlamingoId() == null) {
             return;
         }
-        FullfudNetwork.getChannel().sendToServer(new Fp5LaunchPacket(menu.getFlamingoId(), targetX, targetY, targetZ));
+        FullfudClientNetwork.sendToServer(new Fp5LaunchPacket(menu.getFlamingoId(), targetX, targetY, targetZ));
         onClose();
     }
 

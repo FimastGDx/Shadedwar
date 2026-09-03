@@ -1,11 +1,11 @@
 package com.fullfud.fullfud.core.network.packet;
 
-import com.fullfud.fullfud.core.network.handler.FpvNetworkHandlers;
+import com.fullfud.fullfud.core.network.FullfudNetwork;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 public record FpvControlPacket(UUID droneId,
                                float pitchInput,
@@ -23,7 +23,13 @@ public record FpvControlPacket(UUID droneId,
                                float mousePitchDelta,
                                float mouseRollDelta,
                                float throttle,
-                               byte armAction) {
+                               byte armAction) implements CustomPacketPayload {
+
+    public static final CustomPacketPayload.Type<FpvControlPacket> TYPE =
+        new CustomPacketPayload.Type<>(FullfudNetwork.id("fpv_control"));
+
+    public static final StreamCodec<FriendlyByteBuf, FpvControlPacket> STREAM_CODEC =
+        CustomPacketPayload.codec(FpvControlPacket::write, FpvControlPacket::decode);
 
     public static FpvControlPacket decode(final FriendlyByteBuf buffer) {
         final UUID droneId = buffer.readUUID();
@@ -64,7 +70,7 @@ public record FpvControlPacket(UUID droneId,
         );
     }
 
-    public void encode(final FriendlyByteBuf buffer) {
+    public void write(final FriendlyByteBuf buffer) {
         buffer.writeUUID(droneId);
         buffer.writeFloat(pitchInput);
         buffer.writeFloat(rollInput);
@@ -84,13 +90,8 @@ public record FpvControlPacket(UUID droneId,
         buffer.writeByte(armAction);
     }
 
-    public void handle(final Supplier<NetworkEvent.Context> contextSupplier) {
-        final NetworkEvent.Context context = contextSupplier.get();
-        if (context.getSender() == null || !context.getDirection().getReceptionSide().isServer()) {
-            context.setPacketHandled(true);
-            return;
-        }
-        context.enqueueWork(() -> FpvNetworkHandlers.handleControl(this, context.getSender()));
-        context.setPacketHandled(true);
+    @Override
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+        return TYPE;
     }
 }

@@ -1,7 +1,6 @@
 plugins {
+    id "fabric-loom" version "1.11.8"
     id "java"
-    id "net.minecraftforge.gradle" version "6.0.+"
-    id "org.spongepowered.mixin" version "0.7.+"
 }
 
 group = "com.fullfud"
@@ -31,7 +30,7 @@ def channel = (findProperty("mod_channel") ?: "BETA").toString()
 def buildNumber = readBuildNumber()
 version = "${baseVersion}-${channel}.${buildNumber}"
 
-def bumpTaskNames = ["build", "assemble", "jar", "reobfJar"] as Set
+def bumpTaskNames = ["build", "assemble", "jar", "remapJar"] as Set
 def debugVersion = (findProperty("debugVersion") ?: "false").toString().toBoolean()
 gradle.taskGraph.whenReady { graph ->
     if (debugVersion) {
@@ -61,41 +60,30 @@ gradle.taskGraph.whenReady { graph ->
 
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(17)
+        languageVersion = JavaLanguageVersion.of(21)
     }
+    withSourcesJar()
 }
 
-minecraft {
-    mappings channel: "official", version: "1.20.1"
+loom {
+    accessWidenerPath = file("src/main/resources/fullfud.accesswidener")
+
+    mixin {
+        // Every mixin config in this source set shares one refmap, including the two
+        // vendored lattice configs.
+        defaultRefmapName = "mixins.fullfud.refmap.json"
+    }
 
     runs {
         client {
-            workingDirectory project.file("run")
-            property "forge.logging.console.level", "info"
-            mods {
-                fullfud {
-                    source sourceSets.main
-                }
-            }
+            client()
+            runDir "run"
+            ideConfigGenerated true
         }
         server {
-            workingDirectory project.file("run")
-            property "forge.logging.console.level", "info"
-            mods {
-                fullfud {
-                    source sourceSets.main
-                }
-            }
-        }
-        data {
-            workingDirectory project.file("run")
-            property "forge.logging.console.level", "info"
-            args "--mod", "fullfud", "--all", "--output", file("src/generated/resources").absolutePath, "--existing", file("src/main/resources").absolutePath
-            mods {
-                fullfud {
-                    source sourceSets.main
-                }
-            }
+            server()
+            runDir "run"
+            ideConfigGenerated true
         }
     }
 }
@@ -106,22 +94,14 @@ repositories {
         name = "GeckoLib"
         url = "https://dl.cloudsmith.io/public/geckolib3/geckolib/maven/"
     }
-    maven {
-        name = "Sponge"
-        url = "https://repo.spongepowered.org/repository/maven-public/"
-    }
 }
 
-def latticeVersion = "3.0.0"
-def latticeDevJar = files("lattice/build/libs/lattice-${latticeVersion}.jar")
-def latticeReobfJar = files("lattice/build/reobfJar/output.jar")
-
 dependencies {
-    minecraft "net.minecraftforge:forge:1.20.1-47.4.10"
-    implementation fg.deobf("software.bernie.geckolib:geckolib-forge-1.20.1:4.3.1")
-    compileOnly latticeDevJar
-    runtimeOnly latticeDevJar
-    annotationProcessor "org.spongepowered:mixin:0.8.5:processor"
+    minecraft "com.mojang:minecraft:${project.minecraft_version}"
+    mappings loom.officialMojangMappings()
+    modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+    modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+    modImplementation "software.bernie.geckolib:geckolib-fabric-${project.minecraft_version}:${project.geckolib_version}"
 }
 
 sourceSets {
@@ -132,29 +112,25 @@ sourceSets {
 
 tasks.withType(JavaCompile).configureEach {
     options.encoding = "UTF-8"
-    options.release = 17
+    options.release = 21
 }
 
-tasks.named("compileJava") {
-    dependsOn(":lattice:jar")
-}
+processResources {
+    inputs.property "version", providers.provider { project.version.toString() }
+    inputs.property "minecraft_version", project.minecraft_version
+    inputs.property "loader_version", project.loader_version
 
-tasks.matching { it.name in ["runClient", "runServer", "runData"] }.configureEach {
-    dependsOn(":lattice:jar")
-}
-
-mixin {
-    add sourceSets.main, "mixins.fullfud.refmap.json"
-    config "mixins.fullfud.json"
+    filesMatching("fabric.mod.json") {
+        expand([
+            "version": project.version.toString(),
+            "minecraft_version": project.minecraft_version,
+            "loader_version": project.loader_version
+        ])
+    }
 }
 
 jar {
-    dependsOn(":lattice:reobfJar")
     archiveVersion.set(providers.provider { project.version.toString() })
-    from(latticeReobfJar) {
-        into "META-INF/jarjar"
-        rename { "lattice-${latticeVersion}.jar" }
-    }
     manifest {
         attributes([
             "Specification-Title": "shadedwar",
@@ -162,21 +138,12 @@ jar {
             "Specification-Version": "${-> project.version}",
             "Implementation-Title": project.name,
             "Implementation-Version": "${-> project.version}",
-            "Implementation-Vendor": "fullfud",
-            "MixinConfigs": "mixins.fullfud.json"
+            "Implementation-Vendor": "fullfud"
         ])
     }
 }
 
-jar.finalizedBy("reobfJar")
-
-processResources {
-    inputs.property "version", providers.provider { project.version.toString() }
-    filesMatching("META-INF/mods.toml") {
-        expand(["version": "${-> project.version}"])
-    }
+remapJar {
+    archiveVersion.set(providers.provider { project.version.toString() })
 }
 
-tasks.named("build") {
-    dependsOn("reobfJar")
-}

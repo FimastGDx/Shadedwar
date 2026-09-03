@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:monitor",
+  "criteria": {
+    "shaheds": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "#fullfud:shaheds"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:shahed_136"
+    },
+    "title": {
+      "translate": "advancements.fullfud.shahed.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.shahed.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "shaheds"
+    ]
+  ]
+}

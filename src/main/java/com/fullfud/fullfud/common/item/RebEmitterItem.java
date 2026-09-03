@@ -10,6 +10,7 @@ import net.minecraft.world.item.Item;
 import net.minecraft.world.item.context.UseOnContext;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
+import net.minecraft.world.entity.EntitySpawnReason;
 
 public class RebEmitterItem extends Item {
     public RebEmitterItem(final Properties properties) {
@@ -20,7 +21,7 @@ public class RebEmitterItem extends Item {
     public InteractionResult useOn(final UseOnContext context) {
         final Level level = context.getLevel();
         if (!(level instanceof ServerLevel serverLevel)) {
-            return InteractionResult.sidedSuccess(level.isClientSide);
+            return level.isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
 
         final Direction face = context.getClickedFace();
@@ -36,7 +37,7 @@ public class RebEmitterItem extends Item {
             return InteractionResult.FAIL;
         }
 
-        final RebEmitterEntity emitter = FullfudRegistries.REB_EMITTER_ENTITY.get().create(serverLevel);
+        final RebEmitterEntity emitter = FullfudRegistries.REB_EMITTER_ENTITY.get().create(serverLevel, EntitySpawnReason.SPAWN_ITEM_USE);
         if (emitter == null) {
             return InteractionResult.FAIL;
         }
@@ -47,10 +48,14 @@ public class RebEmitterItem extends Item {
             return InteractionResult.FAIL;
         }
 
+        // Detection warnings go to whoever put it down, so the owner has to be recorded at placement.
+        if (context.getPlayer() != null) {
+            emitter.setOwner(context.getPlayer().getUUID());
+        }
         serverLevel.addFreshEntity(emitter);
         if (context.getPlayer() == null || !context.getPlayer().getAbilities().instabuild) {
             context.getItemInHand().shrink(1);
         }
-        return InteractionResult.sidedSuccess(level.isClientSide);
+        return level.isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
     }
 }

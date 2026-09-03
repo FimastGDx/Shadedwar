@@ -19,7 +19,7 @@ import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
 
-import javax.annotation.Nullable;
+import org.jetbrains.annotations.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -54,8 +54,23 @@ public final class DroneExplosionEffects {
         final DronePreset preset,
         @Nullable final Vec3 impactDirection
     ) {
+        afterFpvExplosion(level, source, attacker, preset, impactDirection, 1.0F);
+    }
+
+    /**
+     * @param blastScale linear multiplier on the radii and the fragment count, from
+     *                   {@code WarheadCharge.blastScale()}. 1 is the tuned baseline.
+     */
+    public static void afterFpvExplosion(
+        final ServerLevel level,
+        final Entity source,
+        @Nullable final LivingEntity attacker,
+        final DronePreset preset,
+        @Nullable final Vec3 impactDirection,
+        final float blastScale
+    ) {
         final BlastProfile profile = preset == DronePreset.STRIKE_7INCH ? FPV_STRIKE_PROFILE : FPV_PROFILE;
-        applyExplosionEffects(level, source, attacker, profile, impactDirection);
+        applyExplosionEffects(level, source, attacker, profile.scaled(blastScale), impactDirection);
     }
 
     public static void afterShahedExplosion(final ServerLevel level, final Entity source, @Nullable final LivingEntity attacker) {
@@ -68,7 +83,18 @@ public final class DroneExplosionEffects {
         @Nullable final LivingEntity attacker,
         @Nullable final Vec3 facingDirection
     ) {
-        applyExplosionEffects(level, source, attacker, SHAHED_PROFILE, facingDirection);
+        afterShahedExplosion(level, source, attacker, facingDirection, 1.0F);
+    }
+
+    /** @param blastScale see {@link #afterFpvExplosion(ServerLevel, Entity, LivingEntity, DronePreset, Vec3, float)}. */
+    public static void afterShahedExplosion(
+        final ServerLevel level,
+        final Entity source,
+        @Nullable final LivingEntity attacker,
+        @Nullable final Vec3 facingDirection,
+        final float blastScale
+    ) {
+        applyExplosionEffects(level, source, attacker, SHAHED_PROFILE.scaled(blastScale), facingDirection);
     }
 
     public static void applyDirectImpactVehicleDamage(
@@ -140,9 +166,11 @@ public final class DroneExplosionEffects {
             }
 
             target.invulnerableTime = 0;
-            final boolean hurt = target.hurt(damageSource, damage);
+            // 1.21.2 made Entity.hurt void and server-side damage goes through hurtServer, which
+            // keeps the boolean this fallback depends on.
+            final boolean hurt = target.hurtServer(level, damageSource, damage);
             if (!hurt) {
-                target.hurt(level.damageSources().generic(), damage);
+                target.hurtServer(level, level.damageSources().generic(), damage);
             }
         }
     }
@@ -171,7 +199,7 @@ public final class DroneExplosionEffects {
                 continue;
             }
 
-            final double seenPercent = Mth.clamp(net.minecraft.world.level.Explosion.getSeenPercent(origin, vehicle), 0.01D, 1.0D);
+            final double seenPercent = Mth.clamp(net.minecraft.world.level.ServerExplosion.getSeenPercent(origin, vehicle), 0.01D, 1.0D);
             final double damagePercent = (1.0D - distanceRatio) * seenPercent;
             final float damage = (float) (((damagePercent * damagePercent + damagePercent) / 2.0D) * SBW_VEHICLE_EXPLOSION_DAMAGE);
             if (damage <= 0.0F) {
@@ -391,6 +419,28 @@ public final class DroneExplosionEffects {
     ) {
         private float baseBlastDamage() {
             return Math.max(120.0F, this.blastLethalRadius * 60.0F);
+        }
+
+        /**
+         * The same profile with the radii and the fragment count multiplied. Damage per fragment and the
+         * fragment velocity cap are deliberately left alone: a bigger charge throws more casing further,
+         * it does not make each individual piece hit harder.
+         */
+        private BlastProfile scaled(final float scale) {
+            if (!Float.isFinite(scale) || Math.abs(scale - 1.0F) < 1.0E-4F) {
+                return this;
+            }
+            final float clamped = Math.max(0.25F, Math.min(4.0F, scale));
+            return new BlastProfile(
+                Math.round(this.shrapnelCount * clamped),
+                this.shrapnelDamage,
+                this.shrapnelRange * clamped,
+                this.blastLethalRadius * clamped,
+                this.blastMaxRadius * clamped,
+                this.shrapnelSpeedCap,
+                this.shrapnelPattern,
+                this.coneHalfAngleDeg
+            );
         }
     }
 

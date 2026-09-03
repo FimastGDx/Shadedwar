@@ -2,10 +2,19 @@
   "required": false,
   "minVersion": "0.8",
   "package": "com.fullfud.fullfud.mixin",
-  "compatibilityLevel": "JAVA_17",
+  "compatibilityLevel": "JAVA_21",
   "refmap": "mixins.fullfud.refmap.json",
+  "mixins": [
+    "ExplosionMixin"
+  ],
   "client": [
+    "client.CameraAccessor",
     "client.ChannelAccessor",
+    "client.ClientLanguageMixin",
+    "client.GameRendererMixin",
+    "client.GuiMixin",
+    "client.ItemInHandRendererMixin",
+    "client.LevelSoundMixin",
     "client.SoundEngineAccessor",
     "client.SoundManagerAccessor"
   ],

@@ -1,6 +1,17 @@
 {
   "pack": {
-    "pack_format": 15,
+    "pack_format": 46,
+    "supported_formats": {
+      "min_inclusive": 46,
+      "max_inclusive": 61
+    },
     "description": "Resources for the Fullfud mod"
+  },
+  "language": {
+    "rpr": {
+      "name": "Русскій (дореформенный)",
+      "region": "Россійская Имперія",
+      "bidirectional": false
+    }
   }
 }

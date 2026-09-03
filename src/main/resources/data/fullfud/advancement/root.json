@@ -1,0 +1,45 @@
+{
+  "criteria": {
+    "lithium": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:lithium"
+          }
+        ]
+      }
+    },
+    "ingot_steel": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:ingot_steel"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:ingot_steel"
+    },
+    "title": {
+      "translate": "advancements.fullfud.root.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.root.description"
+    },
+    "show_toast": false,
+    "announce_to_chat": false,
+    "background": "minecraft:textures/gui/advancements/backgrounds/stone.png"
+  },
+  "requirements": [
+    [
+      "lithium",
+      "ingot_steel"
+    ]
+  ]
+}

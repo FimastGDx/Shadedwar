@@ -1,0 +1,9 @@
+{
+  "model": {
+    "type": "minecraft:special",
+    "base": "fullfud:item/fpv_configurator",
+    "model": {
+      "type": "geckolib:geckolib"
+    }
+  }
+}

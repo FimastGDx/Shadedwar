@@ -1,0 +1,28 @@
+{
+  "parent": "fullfud:shahed_launch",
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:shahed_136_black"
+    },
+    "title": {
+      "translate": "advancements.fullfud.shahed_strike.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.shahed_strike.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true,
+    "frame": "challenge"
+  },
+  "requirements": [
+    [
+      "granted"
+    ]
+  ]
+}

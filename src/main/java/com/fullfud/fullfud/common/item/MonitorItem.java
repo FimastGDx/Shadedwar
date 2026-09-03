@@ -5,27 +5,27 @@ import com.fullfud.fullfud.common.entity.Fp5FlamingoEntity;
 import com.fullfud.fullfud.common.entity.ShahedDroneEntity;
 import com.fullfud.fullfud.common.menu.Fp5MonitorMenu;
 import com.fullfud.fullfud.common.menu.ShahedMonitorMenu;
+import com.fullfud.fullfud.core.FullfudDataComponents;
 import com.fullfud.fullfud.core.data.ShahedLinkData;
 import com.fullfud.fullfud.core.network.FullfudNetwork;
 import com.fullfud.fullfud.core.network.packet.ShahedLinkPacket;
-import net.minecraft.client.renderer.BlockEntityWithoutLevelRenderer;
-import net.minecraft.nbt.CompoundTag;
+import net.fabricmc.fabric.api.screenhandler.v1.ExtendedScreenHandlerFactory;
 import net.minecraft.network.chat.Component;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
-import net.minecraft.world.InteractionResultHolder;
-import net.minecraft.world.SimpleMenuProvider;
+import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.player.Inventory;
 import net.minecraft.world.entity.player.Player;
+import net.minecraft.world.inventory.AbstractContainerMenu;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.Level;
-import net.minecraftforge.client.extensions.common.IClientItemExtensions;
-import net.minecraftforge.network.NetworkHooks;
-import net.minecraftforge.network.PacketDistributor;
 import software.bernie.geckolib.animatable.GeoItem;
-import software.bernie.geckolib.core.animatable.instance.AnimatableInstanceCache;
-import software.bernie.geckolib.core.animation.AnimatableManager;
+import software.bernie.geckolib.animatable.client.GeoRenderProvider;
+import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
+import software.bernie.geckolib.animation.AnimatableManager;
+import software.bernie.geckolib.renderer.GeoItemRenderer;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 import java.util.Optional;
@@ -33,8 +33,6 @@ import java.util.UUID;
 import java.util.function.Consumer;
 
 public class MonitorItem extends Item implements GeoItem {
-    private static final String DRONE_TAG = "LinkedShahed";
-    private static final String FP5_TAG = "LinkedFp5Flamingo";
     private final AnimatableInstanceCache cache = GeckoLibUtil.createInstanceCache(this);
 
     public MonitorItem(final Properties properties) {
@@ -42,67 +40,53 @@ public class MonitorItem extends Item implements GeoItem {
     }
 
     @Override
-    public InteractionResultHolder<ItemStack> use(final Level level, final Player player, final InteractionHand hand) {
+    public InteractionResult use(final Level level, final Player player, final InteractionHand hand) {
         final ItemStack stack = player.getItemInHand(hand);
         if (!(player instanceof ServerPlayer serverPlayer)) {
-            return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
+            return InteractionResult.SUCCESS;
         }
 
         final Optional<UUID> linkedDrone = getLinkedDrone(stack);
         if (linkedDrone.isPresent()) {
             openLinkedShahedMonitor(serverPlayer, stack, linkedDrone.get());
-            return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
+            return InteractionResult.SUCCESS_SERVER;
         }
 
         final Optional<UUID> linkedFp5 = getLinkedFp5(stack);
         if (linkedFp5.isPresent()) {
             openLinkedFp5Monitor(serverPlayer, stack, linkedFp5.get());
-            return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
+            return InteractionResult.SUCCESS_SERVER;
         }
 
         player.displayClientMessage(Component.translatable("message.fullfud.monitor.no_link"), true);
 
-        return InteractionResultHolder.sidedSuccess(stack, level.isClientSide);
+        return InteractionResult.SUCCESS_SERVER;
     }
 
     public static Optional<UUID> getLinkedDrone(final ItemStack stack) {
-        final CompoundTag tag = stack.getTag();
-        if (tag == null || !tag.hasUUID(DRONE_TAG)) {
-            return Optional.empty();
-        }
-        return Optional.of(tag.getUUID(DRONE_TAG));
+        return Optional.ofNullable(stack.get(FullfudDataComponents.LINKED_SHAHED));
     }
 
     public static void setLinkedDrone(final ItemStack stack, final UUID droneId) {
         clearLinkedFp5(stack);
-        stack.getOrCreateTag().putUUID(DRONE_TAG, droneId);
+        stack.set(FullfudDataComponents.LINKED_SHAHED, droneId);
     }
 
     public static void clearLinkedDrone(final ItemStack stack) {
-        final CompoundTag tag = stack.getTag();
-        if (tag != null) {
-            tag.remove(DRONE_TAG);
-        }
+        stack.remove(FullfudDataComponents.LINKED_SHAHED);
     }
 
     public static Optional<UUID> getLinkedFp5(final ItemStack stack) {
-        final CompoundTag tag = stack.getTag();
-        if (tag == null || !tag.hasUUID(FP5_TAG)) {
-            return Optional.empty();
-        }
-        return Optional.of(tag.getUUID(FP5_TAG));
+        return Optional.ofNullable(stack.get(FullfudDataComponents.LINKED_FP5));
     }
 
     public static void setLinkedFp5(final ItemStack stack, final UUID flamingoId) {
         clearLinkedDrone(stack);
-        stack.getOrCreateTag().putUUID(FP5_TAG, flamingoId);
+        stack.set(FullfudDataComponents.LINKED_FP5, flamingoId);
     }
 
     public static void clearLinkedFp5(final ItemStack stack) {
-        final CompoundTag tag = stack.getTag();
-        if (tag != null) {
-            tag.remove(FP5_TAG);
-        }
+        stack.remove(FullfudDataComponents.LINKED_FP5);
     }
 
     public static void linkAndOpenFp5Monitor(final ServerPlayer player, final ItemStack stack, final Fp5FlamingoEntity flamingo) {
@@ -122,21 +106,34 @@ public class MonitorItem extends Item implements GeoItem {
             return false;
         }
         try {
-            NetworkHooks.openScreen(player,
-                new SimpleMenuProvider((containerId, inv, ply) -> new Fp5MonitorMenu(
-                    containerId,
-                    inv,
-                    flamingo.getUUID(),
-                    flamingo.getId(),
-                    flamingo.getMonitorTarget(),
-                    flamingo.isLaunched()
-                ), Component.translatable("menu.fullfud.fp5_monitor")),
-                buf -> {
-                    buf.writeUUID(flamingo.getUUID());
-                    buf.writeInt(flamingo.getId());
-                    buf.writeBlockPos(flamingo.getMonitorTarget());
-                    buf.writeBoolean(flamingo.isLaunched());
-                });
+            player.openMenu(new ExtendedScreenHandlerFactory<Fp5MonitorMenu.Data>() {
+                @Override
+                public Component getDisplayName() {
+                    return Component.translatable("menu.fullfud.fp5_monitor");
+                }
+
+                @Override
+                public AbstractContainerMenu createMenu(final int containerId, final Inventory inv, final Player ply) {
+                    return new Fp5MonitorMenu(
+                        containerId,
+                        inv,
+                        flamingo.getUUID(),
+                        flamingo.getId(),
+                        flamingo.getMonitorTarget(),
+                        flamingo.isLaunched()
+                    );
+                }
+
+                @Override
+                public Fp5MonitorMenu.Data getScreenOpeningData(final ServerPlayer serverPlayer) {
+                    return new Fp5MonitorMenu.Data(
+                        flamingo.getUUID(),
+                        flamingo.getId(),
+                        flamingo.getMonitorTarget(),
+                        flamingo.isLaunched()
+                    );
+                }
+            });
             return true;
         } catch (final Throwable ignored) {
             return false;
@@ -207,13 +204,22 @@ public class MonitorItem extends Item implements GeoItem {
             }
             drone.addViewer(serverPlayer);
             try {
-                NetworkHooks.openScreen(serverPlayer,
-                    new SimpleMenuProvider((containerId, inv, ply) -> new ShahedMonitorMenu(containerId, inv, droneId, drone.getId()),
-                        Component.translatable("menu.fullfud.shahed_monitor")),
-                    buf -> {
-                        buf.writeUUID(droneId);
-                        buf.writeInt(drone.getId());
-                    });
+                serverPlayer.openMenu(new ExtendedScreenHandlerFactory<ShahedMonitorMenu.Data>() {
+                    @Override
+                    public Component getDisplayName() {
+                        return Component.translatable("menu.fullfud.shahed_monitor");
+                    }
+
+                    @Override
+                    public AbstractContainerMenu createMenu(final int containerId, final Inventory inv, final Player ply) {
+                        return new ShahedMonitorMenu(containerId, inv, droneId, drone.getId());
+                    }
+
+                    @Override
+                    public ShahedMonitorMenu.Data getScreenOpeningData(final ServerPlayer viewer) {
+                        return new ShahedMonitorMenu.Data(droneId, drone.getId());
+                    }
+                });
             } catch (final Throwable t) {
                 drone.removeViewer(serverPlayer);
                 drone.endRemoteControl(serverPlayer);
@@ -222,7 +228,7 @@ public class MonitorItem extends Item implements GeoItem {
         }, () -> {
             unlinkAcrossLevels(serverPlayer, droneId);
             clearLinkedDrone(stack);
-            FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> serverPlayer), new ShahedLinkPacket(droneId, false));
+            FullfudNetwork.sendToPlayer(serverPlayer, new ShahedLinkPacket(droneId, false));
             serverPlayer.displayClientMessage(Component.translatable("message.fullfud.monitor.drone_missing"), true);
         });
     }
@@ -248,12 +254,12 @@ public class MonitorItem extends Item implements GeoItem {
     }
 
     @Override
-    public void initializeClient(Consumer<IClientItemExtensions> consumer) {
-        consumer.accept(new IClientItemExtensions() {
+    public void createGeoRenderer(Consumer<GeoRenderProvider> consumer) {
+        consumer.accept(new GeoRenderProvider() {
             private MonitorRenderer renderer;
 
             @Override
-            public BlockEntityWithoutLevelRenderer getCustomRenderer() {
+            public GeoItemRenderer<?> getGeoItemRenderer() {
                 if (this.renderer == null)
                     this.renderer = new MonitorRenderer();
                 return this.renderer;

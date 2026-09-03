@@ -1,0 +1,28 @@
+{
+  "parent": "fullfud:first_drone",
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:reb_battery"
+    },
+    "title": {
+      "translate": "advancements.fullfud.arm.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.arm.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true,
+    "frame": "goal"
+  },
+  "requirements": [
+    [
+      "granted"
+    ]
+  ]
+}
