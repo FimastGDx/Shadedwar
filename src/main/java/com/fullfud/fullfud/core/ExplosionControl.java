@@ -1,35 +1,21 @@
 package com.fullfud.fullfud.core;
 
-import com.fullfud.fullfud.FullfudMod;
 import com.fullfud.fullfud.core.config.FullfudServerConfig;
-import net.minecraft.world.level.Level;
-import net.minecraftforge.event.level.ExplosionEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
+import net.minecraft.server.level.ServerLevel;
 
-@Mod.EventBusSubscriber(modid = FullfudMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
+/**
+ * Global explosion block-damage switch. Forge exposed this through an {@code ExplosionEvent.Detonate}
+ * listener; vanilla has no such hook, so {@code mixin.ExplosionMixin} calls
+ * {@link #isExplosionBlockDamageDisabled(ServerLevel)} and cancels the block pass itself.
+ */
 public final class ExplosionControl {
     private ExplosionControl() {
     }
 
-    public static boolean isExplosionBlockDamageDisabled(final Level level) {
+    public static boolean isExplosionBlockDamageDisabled(final ServerLevel level) {
         if (FullfudServerConfig.SERVER.disableExplosionBlockDamage.get()) {
             return true;
         }
         return level != null && level.getGameRules().getBoolean(FullfudGameRules.DISABLE_EXPLOSION_BLOCK_DAMAGE);
-    }
-
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
-    public static void onExplosionDetonate(final ExplosionEvent.Detonate event) {
-        if (event == null || event.getExplosion() == null || event.getLevel() == null) {
-            return;
-        }
-        if (event.getLevel().isClientSide()) {
-            return;
-        }
-        if (isExplosionBlockDamageDisabled(event.getLevel())) {
-            event.getAffectedBlocks().clear();
-        }
     }
 }

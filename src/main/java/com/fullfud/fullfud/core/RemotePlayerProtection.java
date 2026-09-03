@@ -1,6 +1,7 @@
 package com.fullfud.fullfud.core;
 
-import com.fullfud.fullfud.FullfudMod;
+import com.fullfud.fullfud.core.data.PersistentData;
+import net.fabricmc.fabric.api.entity.event.v1.ServerLivingEntityEvents;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
 import net.minecraft.resources.ResourceLocation;
@@ -8,13 +9,20 @@ import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.damagesource.DamageTypes;
 import net.minecraft.world.entity.Entity;
-import net.minecraftforge.event.entity.living.LivingAttackEvent;
-import net.minecraftforge.event.entity.living.LivingHurtEvent;
-import net.minecraftforge.eventbus.api.EventPriority;
-import net.minecraftforge.eventbus.api.SubscribeEvent;
-import net.minecraftforge.fml.common.Mod;
 
-@Mod.EventBusSubscriber(modid = FullfudMod.MOD_ID, bus = Mod.EventBusSubscriber.Bus.FORGE)
+/**
+ * Shields a player whose view is attached to a drone from damage dealt by that drone.
+ *
+ * <p>Registered from {@code FullfudMod}: on Forge this class was an {@code @Mod.EventBusSubscriber}
+ * found by annotation scanning, which Fabric does not do. The two Forge listeners
+ * ({@code LivingAttackEvent} and {@code LivingHurtEvent}, both at {@code HIGHEST}) collapse into the
+ * single {@code ServerLivingEntityEvents.ALLOW_DAMAGE} hook, which runs before the damage is applied
+ * at all — so there is no second stage left to zero the amount on.
+ *
+ * <p>Void and fall damage are also cancelled for the duration of a session, whatever caused them: the
+ * body cannot move or react while the pilot is looking through a drone, so those two are always the
+ * mod's own doing rather than something the player could have avoided.
+ */
 public final class RemotePlayerProtection {
     private static final String ROOT_TAG = "fullfud_remote_protection";
     private static final String TAG_EXPIRES_AT = "ExpiresAt";
@@ -27,6 +35,11 @@ public final class RemotePlayerProtection {
     private RemotePlayerProtection() {
     }
 
+    public static void register() {
+        ServerLivingEntityEvents.ALLOW_DAMAGE.register((entity, source, amount) ->
+            !(entity instanceof ServerPlayer player) || !shouldCancelDamage(player, source));
+    }
+
     public static void touch(final ServerPlayer player) {
         touch(player, null, 0.0D);
     }
@@ -35,7 +48,7 @@ public final class RemotePlayerProtection {
         if (player == null) {
             return;
         }
-        final CompoundTag root = player.getPersistentData();
+        final CompoundTag root = PersistentData.of(player);
         final CompoundTag protectionTag = root.contains(ROOT_TAG, Tag.TAG_COMPOUND)
             ? root.getCompound(ROOT_TAG)
             : new CompoundTag();
@@ -52,7 +65,7 @@ public final class RemotePlayerProtection {
         if (hazard == null || drone == null) {
             return;
         }
-        final CompoundTag root = hazard.getPersistentData();
+        final CompoundTag root = PersistentData.of(hazard);
         root.putUUID(TAG_HAZARD_DRONE_UUID, drone.getUUID());
         root.putString(TAG_HAZARD_DRONE_DIM, drone.level().dimension().location().toString());
     }
@@ -61,11 +74,11 @@ public final class RemotePlayerProtection {
         if (target == null || source == null) {
             return;
         }
-        final CompoundTag sourceTag = source.getPersistentData();
+        final CompoundTag sourceTag = PersistentData.of(source);
         if (!sourceTag.hasUUID(TAG_HAZARD_DRONE_UUID) || !sourceTag.contains(TAG_HAZARD_DRONE_DIM, Tag.TAG_STRING)) {
             return;
         }
-        final CompoundTag targetTag = target.getPersistentData();
+        final CompoundTag targetTag = PersistentData.of(target);
         targetTag.putUUID(TAG_HAZARD_DRONE_UUID, sourceTag.getUUID(TAG_HAZARD_DRONE_UUID));
         targetTag.putString(TAG_HAZARD_DRONE_DIM, sourceTag.getString(TAG_HAZARD_DRONE_DIM));
     }
@@ -74,7 +87,7 @@ public final class RemotePlayerProtection {
         if (player == null) {
             return;
         }
-        final CompoundTag root = player.getPersistentData();
+        final CompoundTag root = PersistentData.of(player);
         if (!root.contains(ROOT_TAG, Tag.TAG_COMPOUND)) {
             return;
         }
@@ -91,28 +104,7 @@ public final class RemotePlayerProtection {
             return;
         }
         player.fallDistance = 0.0F;
-        player.getPersistentData().remove(ROOT_TAG);
-    }
-
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
-    public static void onLivingAttack(final LivingAttackEvent event) {
-        if (event == null || !(event.getEntity() instanceof ServerPlayer player)) {
-            return;
-        }
-        if (shouldCancelDamage(player, event.getSource())) {
-            event.setCanceled(true);
-        }
-    }
-
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
-    public static void onLivingHurt(final LivingHurtEvent event) {
-        if (event == null || !(event.getEntity() instanceof ServerPlayer player)) {
-            return;
-        }
-        if (shouldCancelDamage(player, event.getSource())) {
-            event.setCanceled(true);
-            event.setAmount(0.0F);
-        }
+        PersistentData.of(player).remove(ROOT_TAG);
     }
 
     private static boolean shouldCancelDamage(final ServerPlayer player, final DamageSource source) {
@@ -122,6 +114,15 @@ public final class RemotePlayerProtection {
         if (source.is(DamageTypes.GENERIC_KILL)) {
             return false;
         }
+        if (activeProtectionTag(player) == null) {
+            return false;
+        }
+        // The pilot's body is parked and unable to react while the session runs (RemoteControlFailsafe pins it),
+        // so anything that only happens to a body left standing in place is on us, not on the player. The void
+        // one is not hypothetical: before the body was pinned it fell out of the world mid-flight.
+        if (source.is(DamageTypes.FELL_OUT_OF_WORLD) || source.is(DamageTypes.FALL)) {
+            return true;
+        }
         final ProtectedDrone protectedDrone = resolveProtectedDrone(player);
         if (protectedDrone == null) {
             return false;
@@ -130,14 +131,23 @@ public final class RemotePlayerProtection {
             || matchesProtectedDrone(protectedDrone, source.getEntity());
     }
 
-    private static ProtectedDrone resolveProtectedDrone(final ServerPlayer player) {
-        final CompoundTag root = player.getPersistentData();
+    /** The protection tag while it is still live, or {@code null} — clearing it once it has expired. */
+    private static CompoundTag activeProtectionTag(final ServerPlayer player) {
+        final CompoundTag root = PersistentData.of(player);
         if (!root.contains(ROOT_TAG, Tag.TAG_COMPOUND)) {
             return null;
         }
         final CompoundTag protectionTag = root.getCompound(ROOT_TAG);
         if (currentTick(player) > protectionTag.getLong(TAG_EXPIRES_AT)) {
             clear(player);
+            return null;
+        }
+        return protectionTag;
+    }
+
+    private static ProtectedDrone resolveProtectedDrone(final ServerPlayer player) {
+        final CompoundTag protectionTag = activeProtectionTag(player);
+        if (protectionTag == null) {
             return null;
         }
         if (!protectionTag.hasUUID(TAG_DRONE_UUID) || !protectionTag.contains(TAG_DRONE_DIM, Tag.TAG_STRING)) {
@@ -158,7 +168,7 @@ public final class RemotePlayerProtection {
             && sourceEntity.level().dimension().location().equals(protectedDrone.dimensionId)) {
             return true;
         }
-        final CompoundTag root = sourceEntity.getPersistentData();
+        final CompoundTag root = PersistentData.of(sourceEntity);
         return root.hasUUID(TAG_HAZARD_DRONE_UUID)
             && root.getUUID(TAG_HAZARD_DRONE_UUID).equals(protectedDrone.droneId)
             && root.contains(TAG_HAZARD_DRONE_DIM, Tag.TAG_STRING)

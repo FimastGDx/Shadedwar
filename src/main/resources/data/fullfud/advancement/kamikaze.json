@@ -1,0 +1,28 @@
+{
+  "parent": "fullfud:arm",
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:fpv_drone_strike"
+    },
+    "title": {
+      "translate": "advancements.fullfud.kamikaze.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.kamikaze.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true,
+    "frame": "goal"
+  },
+  "requirements": [
+    [
+      "granted"
+    ]
+  ]
+}

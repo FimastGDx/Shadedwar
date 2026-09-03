@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:electronics",
+  "criteria": {
+    "fpv_goggles": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:fpv_goggles"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:fpv_goggles"
+    },
+    "title": {
+      "translate": "advancements.fullfud.goggles.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.goggles.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "fpv_goggles"
+    ]
+  ]
+}

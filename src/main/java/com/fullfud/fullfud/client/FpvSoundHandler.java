@@ -9,27 +9,28 @@ import com.fullfud.fullfud.core.config.FullfudClientConfig;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
 import net.minecraft.client.Minecraft;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.event.TickEvent;
 
-@OnlyIn(Dist.CLIENT)
+@Environment(EnvType.CLIENT)
 public final class FpvSoundHandler {
     private static final Map<UUID, Controller> CONTROLLERS = new HashMap<>();
 
     private FpvSoundHandler() {
     }
 
-    public static void onClientTick(final TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) {
-            return;
-        }
-        final Minecraft minecraft = Minecraft.getInstance();
+    /**
+     * Registered on {@code ClientTickEvents.END_CLIENT_TICK} from {@code FpvClientHandler}. The Forge
+     * listener took a client tick event and returned early unless the phase was END; the Fabric event is
+     * end-of-tick only, so that guard is gone and the client arrives as a parameter rather than through
+     * {@code Minecraft.getInstance()}.
+     */
+    public static void onClientTick(final Minecraft minecraft) {
         if (minecraft == null || minecraft.level == null || minecraft.isPaused()) {
             clear();
             return;

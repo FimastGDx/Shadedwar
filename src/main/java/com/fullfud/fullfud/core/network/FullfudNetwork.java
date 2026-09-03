@@ -1,66 +1,96 @@
 package com.fullfud.fullfud.core.network;
 
 import com.fullfud.fullfud.FullfudMod;
-import com.fullfud.fullfud.core.network.packet.FpvControlPacket;
-import com.fullfud.fullfud.core.network.packet.FpvReleasePacket;
-import com.fullfud.fullfud.core.network.packet.Fp5LaunchPacket;
+import com.fullfud.fullfud.core.network.handler.Fp5NetworkHandlers;
+import com.fullfud.fullfud.core.network.handler.FpvNetworkHandlers;
+import com.fullfud.fullfud.core.network.handler.ShahedNetworkHandlers;
 import com.fullfud.fullfud.core.network.packet.DroneAudioLoopPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioOneShotPacket;
+import com.fullfud.fullfud.core.network.packet.Fp5LaunchPacket;
+import com.fullfud.fullfud.core.network.packet.FpvControlPacket;
+import com.fullfud.fullfud.core.network.packet.FpvDetonatePacket;
+import com.fullfud.fullfud.core.network.packet.FpvReleasePacket;
 import com.fullfud.fullfud.core.network.packet.OpenFpvConfiguratorPacket;
-import com.fullfud.fullfud.core.network.packet.UpdateFpvDroneConfigPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedControlPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedGhostUpdatePacket;
 import com.fullfud.fullfud.core.network.packet.ShahedLinkPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedStatusPacket;
+import com.fullfud.fullfud.core.network.packet.UpdateFpvDroneConfigPacket;
+import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
+import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.resources.ResourceLocation;
-import net.minecraftforge.network.NetworkRegistry;
-import net.minecraftforge.network.simple.SimpleChannel;
+import net.minecraft.server.level.ServerPlayer;
 
+/**
+ * Server side of the mod's networking. Client-bound receivers live in {@link FullfudClientNetwork}.
+ *
+ * <p>Forge's single {@code fullfud:main} {@code SimpleChannel} is gone: on Fabric every payload
+ * carries its own channel id, so the implicit sequential packet ids — and the hazard of shifting them
+ * by inserting a packet in the middle — no longer exist.
+ */
 public final class FullfudNetwork {
-    private static final String PROTOCOL_VERSION = "5";
-    private static SimpleChannel channel;
-    private static int packetId = 0;
+
+    /**
+     * Wire-protocol generation, prefixed onto every channel id. Forge checked this during the
+     * {@code SimpleChannel} handshake; here it means a client built against a different generation
+     * simply has none of our channels registered, so {@code canSend} reports false instead of the
+     * two sides mis-decoding each other. Bump it whenever a packet's field layout changes.
+     */
+    public static final String PROTOCOL_VERSION = "5";
 
     private FullfudNetwork() {
     }
 
+    /** Channel id for a packet, namespaced by mod id and protocol generation. */
+    public static ResourceLocation id(final String name) {
+        return ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, PROTOCOL_VERSION + "/" + name);
+    }
+
+    /**
+     * Declares every payload's codec to both sides, then registers the server-bound receivers.
+     *
+     * <p>The codec registration is direction-scoped and must happen in common init: a payload the
+     * receiving side has not registered for that direction is rejected before decode, which is the
+     * mechanism {@link #PROTOCOL_VERSION} rides on. Fabric's typed handlers already run on the
+     * server thread, so Forge's {@code enqueueWork} has no counterpart here, and the direction
+     * checks the packets used to perform are structural: a C2S packet can only arrive through this
+     * class.
+     *
+     * <p>The handlers themselves are unchanged and still re-resolve the target entity by UUID from
+     * {@code player.serverLevel()} rather than trusting anything client-supplied.
+     */
     public static void init() {
-        if (channel != null) {
-            return;
-        }
+        PayloadTypeRegistry.playC2S().register(ShahedControlPacket.TYPE, ShahedControlPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(Fp5LaunchPacket.TYPE, Fp5LaunchPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(FpvControlPacket.TYPE, FpvControlPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(FpvReleasePacket.TYPE, FpvReleasePacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(FpvDetonatePacket.TYPE, FpvDetonatePacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(UpdateFpvDroneConfigPacket.TYPE, UpdateFpvDroneConfigPacket.STREAM_CODEC);
 
-        channel = NetworkRegistry.newSimpleChannel(
-            new ResourceLocation(FullfudMod.MOD_ID, "main"),
-            () -> PROTOCOL_VERSION,
-            PROTOCOL_VERSION::equals,
-            PROTOCOL_VERSION::equals
-        );
+        PayloadTypeRegistry.playS2C().register(ShahedStatusPacket.TYPE, ShahedStatusPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(ShahedGhostUpdatePacket.TYPE, ShahedGhostUpdatePacket.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(ShahedLinkPacket.TYPE, ShahedLinkPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(OpenFpvConfiguratorPacket.TYPE, OpenFpvConfiguratorPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(DroneAudioLoopPacket.TYPE, DroneAudioLoopPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(DroneAudioOneShotPacket.TYPE, DroneAudioOneShotPacket.STREAM_CODEC);
 
-        registerPackets();
+        ServerPlayNetworking.registerGlobalReceiver(ShahedControlPacket.TYPE,
+            (packet, context) -> ShahedNetworkHandlers.handleControl(packet, context.player()));
+        ServerPlayNetworking.registerGlobalReceiver(Fp5LaunchPacket.TYPE,
+            (packet, context) -> Fp5NetworkHandlers.handleLaunch(packet, context.player()));
+        ServerPlayNetworking.registerGlobalReceiver(FpvControlPacket.TYPE,
+            (packet, context) -> FpvNetworkHandlers.handleControl(packet, context.player()));
+        ServerPlayNetworking.registerGlobalReceiver(FpvReleasePacket.TYPE,
+            (packet, context) -> FpvNetworkHandlers.handleRelease(packet, context.player()));
+        ServerPlayNetworking.registerGlobalReceiver(FpvDetonatePacket.TYPE,
+            (packet, context) -> FpvNetworkHandlers.handleDetonate(packet, context.player()));
+        ServerPlayNetworking.registerGlobalReceiver(UpdateFpvDroneConfigPacket.TYPE,
+            (packet, context) -> FpvNetworkHandlers.handleUpdateConfigurator(packet, context.player()));
     }
 
-    public static SimpleChannel getChannel() {
-        if (channel == null) {
-            throw new IllegalStateException("Network channel accessed before initialization");
-        }
-        return channel;
-    }
-
-    private static void registerPackets() {
-        channel.registerMessage(nextId(), ShahedControlPacket.class, ShahedControlPacket::encode, ShahedControlPacket::decode, ShahedControlPacket::handle);
-        channel.registerMessage(nextId(), ShahedStatusPacket.class, ShahedStatusPacket::encode, ShahedStatusPacket::decode, ShahedStatusPacket::handle);
-        channel.registerMessage(nextId(), ShahedGhostUpdatePacket.class, ShahedGhostUpdatePacket::encode, ShahedGhostUpdatePacket::decode, ShahedGhostUpdatePacket::handle);
-        channel.registerMessage(nextId(), ShahedLinkPacket.class, ShahedLinkPacket::encode, ShahedLinkPacket::decode, ShahedLinkPacket::handle);
-        channel.registerMessage(nextId(), Fp5LaunchPacket.class, Fp5LaunchPacket::encode, Fp5LaunchPacket::decode, Fp5LaunchPacket::handle);
-        channel.registerMessage(nextId(), FpvControlPacket.class, FpvControlPacket::encode, FpvControlPacket::decode, FpvControlPacket::handle);
-        channel.registerMessage(nextId(), FpvReleasePacket.class, FpvReleasePacket::encode, FpvReleasePacket::decode, FpvReleasePacket::handle);
-        channel.registerMessage(nextId(), OpenFpvConfiguratorPacket.class, OpenFpvConfiguratorPacket::encode, OpenFpvConfiguratorPacket::decode, OpenFpvConfiguratorPacket::handle);
-        channel.registerMessage(nextId(), UpdateFpvDroneConfigPacket.class, UpdateFpvDroneConfigPacket::encode, UpdateFpvDroneConfigPacket::decode, UpdateFpvDroneConfigPacket::handle);
-        channel.registerMessage(nextId(), DroneAudioLoopPacket.class, DroneAudioLoopPacket::encode, DroneAudioLoopPacket::decode, DroneAudioLoopPacket::handle);
-        channel.registerMessage(nextId(), DroneAudioOneShotPacket.class, DroneAudioOneShotPacket::encode, DroneAudioOneShotPacket::decode, DroneAudioOneShotPacket::handle);
-    }
-
-    private static int nextId() {
-        return packetId++;
+    /** Replacement for {@code PacketDistributor.PLAYER.with(() -> player)}. */
+    public static void sendToPlayer(final ServerPlayer player, final CustomPacketPayload packet) {
+        ServerPlayNetworking.send(player, packet);
     }
 }

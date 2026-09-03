@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:shahed",
+  "criteria": {
+    "shahed_launcher": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:shahed_launcher"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:shahed_launcher"
+    },
+    "title": {
+      "translate": "advancements.fullfud.shahed_launcher.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.shahed_launcher.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "shahed_launcher"
+    ]
+  ]
+}

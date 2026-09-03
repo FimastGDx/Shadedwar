@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "WRW",
+    "RPR",
+    "WRW"
+  ],
+  "key": {
+    "W": "fullfud:wire_copper_new",
+    "R": "minecraft:redstone",
+    "P": "fullfud:insert_steel"
+  },
+  "result": {
+    "id": "fullfud:controller",
+    "count": 1
+  }
+}

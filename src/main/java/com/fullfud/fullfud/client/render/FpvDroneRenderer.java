@@ -8,6 +8,7 @@ import com.mojang.math.Axis;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.culling.Frustum;
 import net.minecraft.client.renderer.entity.EntityRendererProvider;
+import net.minecraft.client.renderer.entity.state.EntityRenderState;
 import software.bernie.geckolib.renderer.GeoEntityRenderer;
 
 public class FpvDroneRenderer extends GeoEntityRenderer<FpvDroneEntity> {
@@ -16,11 +17,15 @@ public class FpvDroneRenderer extends GeoEntityRenderer<FpvDroneEntity> {
         this.shadowRadius = 0.2F;
     }
 
+    // See Fp5FlamingoRenderer#render for why the entity and the partial tick are read off the renderer
+    // now. getVisualYaw is the drone's own interpolation of the yaw vanilla used to pass in.
     @Override
-    public void render(final FpvDroneEntity entity, final float entityYaw, final float partialTick, final PoseStack poseStack, final MultiBufferSource bufferSource, final int packedLight) {
+    public void render(final EntityRenderState renderState, final PoseStack poseStack, final MultiBufferSource bufferSource, final int packedLight) {
+        final FpvDroneEntity entity = this.animatable;
+        final float partialTick = this.partialTick;
         poseStack.pushPose();
 
-        poseStack.mulPose(Axis.YP.rotationDegrees(-entityYaw));
+        poseStack.mulPose(Axis.YP.rotationDegrees(-entity.getVisualYaw(partialTick)));
 
         poseStack.mulPose(Axis.XP.rotationDegrees(entity.getVisualPitch(partialTick)));
 
@@ -28,7 +33,7 @@ public class FpvDroneRenderer extends GeoEntityRenderer<FpvDroneEntity> {
 
         poseStack.translate(0.0D, -0.05D, 0.0D);
 
-        super.render(entity, entityYaw, partialTick, poseStack, bufferSource, packedLight);
+        super.render(renderState, poseStack, bufferSource, packedLight);
         poseStack.popPose();
     }
 
@@ -39,6 +44,6 @@ public class FpvDroneRenderer extends GeoEntityRenderer<FpvDroneEntity> {
         }
         final double distSq = x * x + y * y + z * z;
         final double max = Math.max(1.0D, FullfudClientConfig.CLIENT.fpvRenderDistanceCap.get());
-        return distSq <= max * max && frustum.isVisible(entity.getBoundingBoxForCulling());
+        return distSq <= max * max && frustum.isVisible(getBoundingBoxForCulling(entity));
     }
 }

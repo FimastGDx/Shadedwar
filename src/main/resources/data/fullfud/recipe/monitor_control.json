@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IGI",
+    "WCW",
+    "IRI"
+  ],
+  "key": {
+    "I": "fullfud:ingot_steel",
+    "G": "minecraft:glass_pane",
+    "W": "fullfud:wire_copper_new",
+    "C": "fullfud:controller",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "fullfud:monitor_control",
+    "count": 1
+  }
+}

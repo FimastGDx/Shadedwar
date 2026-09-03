@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:transmitter",
+  "criteria": {
+    "fpv_drones": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "#fullfud:fpv_drones"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:fpv_drone"
+    },
+    "title": {
+      "translate": "advancements.fullfud.first_drone.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.first_drone.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "fpv_drones"
+    ]
+  ]
+}

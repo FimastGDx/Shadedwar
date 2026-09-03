@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PCP",
+    "BBB",
+    "PWP"
+  ],
+  "key": {
+    "P": "fullfud:insert_steel",
+    "C": "fullfud:controller",
+    "B": "fullfud:steel_block",
+    "W": "fullfud:wire_copper_new"
+  },
+  "result": {
+    "id": "fullfud:fp5flamingo",
+    "count": 1
+  }
+}

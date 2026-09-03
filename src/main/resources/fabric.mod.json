@@ -1,0 +1,37 @@
+{
+  "schemaVersion": 1,
+  "id": "fullfud",
+  "version": "${version}",
+  "name": "Shadedwar",
+  "description": "Realistic UAV, etc.",
+  "authors": [
+    "fullfud"
+  ],
+  "contact": {},
+  "license": "See LICENSE file",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "com.fullfud.fullfud.FullfudMod"
+    ],
+    "client": [
+      "com.fullfud.fullfud.FullfudClientMod"
+    ]
+  },
+  "mixins": [
+    "lattice.common.mixins.json",
+    {
+      "config": "lattice.client.mixins.json",
+      "environment": "client"
+    },
+    "mixins.fullfud.json"
+  ],
+  "accessWidener": "fullfud.accesswidener",
+  "depends": {
+    "fabricloader": ">=${loader_version}",
+    "fabric-api": "*",
+    "minecraft": "~${minecraft_version}",
+    "java": ">=21",
+    "geckolib": ">=4.8"
+  }
+}

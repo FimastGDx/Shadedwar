@@ -1,0 +1,35 @@
+{
+  "parent": "fullfud:shahed_launch",
+  "criteria": {
+    "fp5flamingo": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:fp5flamingo"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:fp5flamingo"
+    },
+    "title": {
+      "translate": "advancements.fullfud.flamingo.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.flamingo.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true,
+    "frame": "challenge"
+  },
+  "requirements": [
+    [
+      "fp5flamingo"
+    ]
+  ]
+}

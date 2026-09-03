@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "fullfud:reb_battery",
+    "fullfud:lithium",
+    "fullfud:lithium"
+  ],
+  "result": {
+    "id": "fullfud:reb_battery",
+    "count": 1
+  },
+  "group": "fullfud_battery"
+}

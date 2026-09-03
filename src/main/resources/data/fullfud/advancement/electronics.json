@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:root",
+  "criteria": {
+    "controller": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:controller"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:controller"
+    },
+    "title": {
+      "translate": "advancements.fullfud.electronics.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.electronics.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "controller"
+    ]
+  ]
+}

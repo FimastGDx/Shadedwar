@@ -1,14 +1,16 @@
 package com.fullfud.fullfud.common.entity;
 
 import com.fullfud.fullfud.common.item.MonitorItem;
+import com.fullfud.fullfud.core.BlastLightRefresh;
+import com.fullfud.fullfud.core.ChunkLoadManager;
+import com.fullfud.fullfud.core.EntityDrops;
 import com.fullfud.fullfud.core.FullfudRegistries;
+import com.fullfud.fullfud.core.config.FullfudServerConfig;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.particles.DustParticleOptions;
 import net.minecraft.core.particles.ParticleOptions;
 import net.minecraft.core.particles.ParticleTypes;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
 import net.minecraft.network.syncher.SynchedEntityData;
@@ -33,15 +35,13 @@ import net.minecraft.world.level.levelgen.Heightmap;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.network.NetworkHooks;
 import software.bernie.geckolib.animatable.GeoEntity;
-import software.bernie.geckolib.core.animatable.instance.AnimatableInstanceCache;
-import software.bernie.geckolib.core.animation.AnimatableManager;
-import software.bernie.geckolib.core.animation.AnimationController;
-import software.bernie.geckolib.core.animation.RawAnimation;
-import software.bernie.geckolib.core.object.PlayState;
+import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
+import software.bernie.geckolib.animation.AnimatableManager;
+import software.bernie.geckolib.animation.AnimationController;
+import software.bernie.geckolib.animation.RawAnimation;
+import software.bernie.geckolib.animation.PlayState;
 import software.bernie.geckolib.util.GeckoLibUtil;
-import org.joml.Vector3f;
 
 import java.util.Optional;
 import java.util.UUID;
@@ -75,6 +75,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final String TAG_LAUNCH_TICKS = "LaunchTicks";
     private static final String TAG_PITCH_RATE = "PitchRate";
     private static final String TAG_LATERAL_SLIP = "LateralSlip";
+    private static final String TAG_GUIDANCE_SCALE = "GuidanceScale";
 
     private static final float HITBOX_WIDTH = 1.9375F * SCALE;
     private static final float HITBOX_LENGTH = 5.5F * SCALE;
@@ -92,6 +93,17 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final double CLIMB_TARGET_FORWARD = 24.0D;
     private static final double INITIAL_STRAIGHT_DISTANCE = 200.0D;
     private static final double TURN_AUTHORITY_RAMP_DISTANCE = 160.0D;
+    /**
+     * Range at which the launch profile above is used in full. Shorter shots divide it down (see
+     * {@code guidanceScale}) so the missile always has room left to turn onto the target and dive.
+     */
+    private static final double FULL_GUIDANCE_PROFILE_RANGE = 4.0D * INITIAL_STRAIGHT_DISTANCE;
+    private static final double MIN_GUIDANCE_SCALE = 0.05D;
+    /** Chunk radius held around a missile in flight; below 2 the chunk stops ticking entities. */
+    private static final int FLAMINGO_CHUNK_RADIUS = 3;
+    /** Bank the model rolls into while simple guidance is turning at its full rate. Cosmetic. */
+    private static final float SIMPLE_GUIDANCE_BANK_LIMIT = 28.0F;
+    private static final float SIMPLE_GUIDANCE_BANK_STEP = 2.5F;
     private static final double CLIMB_ALTITUDE_MIN = 20.0D;
     private static final double CLIMB_ALTITUDE_RANDOM = 31.0D;
     private static final double TARGET_ALTITUDE_BUFFER = 8.0D;
@@ -143,6 +155,16 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final double TERMINAL_DISTANCE_THRESHOLD = 1.2D;
     private static final float TERMINAL_DIVE_PITCH = 45.0F;
     private static final float TERMINAL_MAX_PITCH = 72.0F;
+    /** How far above the aim point the missile stops forcing a dive angle and simply points at it. */
+    private static final double TERMINAL_DIVE_FLOOR_MARGIN = 2.0D;
+    /** Multiplier on the simple-guidance turn and pitch rates once the missile is in its dive. */
+    private static final float TERMINAL_RATE_BOOST = 4.0F;
+    /**
+     * Proximity fuse radius. The missile moves three to four blocks a tick, so it can never be made to land exactly
+     * on a point; past this range the warhead goes off at the closest approach instead of letting the missile sail
+     * by and come round for another attempt.
+     */
+    private static final double TERMINAL_FUSE_RADIUS = 12.0D;
     private static final double TERMINAL_GROUND_OFFSET = 0.15D;
     private static final double TERRAIN_IMPACT_BUFFER = 0.35D;
     private static final float TNT_POWER = 4.0F;
@@ -151,7 +173,9 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private static final double EXHAUST_REAR_OFFSET = 2.45D * SCALE;
     private static final double EXHAUST_VERTICAL_OFFSET = 0.16D * SCALE;
     private static final double EXHAUST_SIDE_SPREAD = 0.18D * SCALE;
-    private static final Vector3f BOOSTER_SMOKE_COLOR = new Vector3f(0.96F, 0.96F, 0.96F);
+    // 1.21.2 replaced DustParticleOptions' Vector3f colour with a packed RGB int. 0xF5F5F5 is the old
+    // (0.96, 0.96, 0.96) rounded to bytes.
+    private static final int BOOSTER_SMOKE_COLOR = 0xF5F5F5;
     private static final DustParticleOptions BOOSTER_SMOKE_PARTICLE = new DustParticleOptions(BOOSTER_SMOKE_COLOR, 2.5F);
 
     private static final RawAnimation IDLE_ANIMATION = RawAnimation.begin().thenLoop("idle");
@@ -176,6 +200,13 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private float yawRate;
     private float pitchRate;
     private double lateralSlip;
+    /** Distance to the aim point on the previous tick, for the proximity fuse. Not persisted: reset means "no pass yet". */
+    private double previousImpactDistance = Double.MAX_VALUE;
+    /**
+     * Fraction of the full launch profile this shot uses: it scales both the straight-out leg and the guidance
+     * delay, so a target 120 blocks away is not still flying dead ahead when it passes overhead.
+     */
+    private double guidanceScale = 1.0D;
     private int launchTicks;
     private int lerpSteps;
     private double lerpX;
@@ -201,11 +232,11 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     }
 
     @Override
-    protected void defineSynchedData() {
-        entityData.define(DATA_ON_LAUNCHER, false);
-        entityData.define(DATA_SERVER_YAW, getYRot());
-        entityData.define(DATA_SERVER_PITCH, getXRot());
-        entityData.define(DATA_SERVER_ROLL, 0.0F);
+    protected void defineSynchedData(final SynchedEntityData.Builder builder) {
+        builder.define(DATA_ON_LAUNCHER, false);
+        builder.define(DATA_SERVER_YAW, getYRot());
+        builder.define(DATA_SERVER_PITCH, getXRot());
+        builder.define(DATA_SERVER_ROLL, 0.0F);
     }
 
     @Override
@@ -241,6 +272,9 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         launchTicks = tag.getInt(TAG_LAUNCH_TICKS);
         pitchRate = tag.getFloat(TAG_PITCH_RATE);
         lateralSlip = tag.getDouble(TAG_LATERAL_SLIP);
+        guidanceScale = tag.contains(TAG_GUIDANCE_SCALE)
+            ? Mth.clamp(tag.getDouble(TAG_GUIDANCE_SCALE), MIN_GUIDANCE_SCALE, 1.0D)
+            : 1.0D;
 
         if (isOnLauncher()) {
             noPhysics = true;
@@ -279,6 +313,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         tag.putInt(TAG_LAUNCH_TICKS, launchTicks);
         tag.putFloat(TAG_PITCH_RATE, pitchRate);
         tag.putDouble(TAG_LATERAL_SLIP, lateralSlip);
+        tag.putDouble(TAG_GUIDANCE_SCALE, guidanceScale);
     }
 
     @Override
@@ -315,14 +350,14 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         updateBoundingBox();
     }
 
+    // 1.21.2 dropped lerpTo's trailing teleport flag; the interpolation is otherwise unchanged.
     @Override
     public void lerpTo(final double x,
                        final double y,
                        final double z,
                        final float yaw,
                        final float pitch,
-                       final int posRotationIncrements,
-                       final boolean teleport) {
+                       final int posRotationIncrements) {
         this.lerpX = x;
         this.lerpY = y;
         this.lerpZ = z;
@@ -339,7 +374,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
             if (player instanceof ServerPlayer serverPlayer) {
                 MonitorItem.linkAndOpenFp5Monitor(serverPlayer, held, this);
             }
-            return InteractionResult.sidedSuccess(level().isClientSide());
+            return level().isClientSide() ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         if (!isOnLauncher()) {
             return InteractionResult.PASS;
@@ -351,9 +386,11 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         return launcher != null ? launcher.interact(player, hand) : InteractionResult.FAIL;
     }
 
+    // Entity.hurt is final void since 1.21.2 and forwards here only on a ServerLevel, so the former
+    // isClientSide half of the guard is implicit.
     @Override
-    public boolean hurt(final DamageSource source, final float amount) {
-        if (level().isClientSide || !isAlive()) {
+    public boolean hurtServer(final ServerLevel level, final DamageSource source, final float amount) {
+        if (!isAlive()) {
             return false;
         }
         if (launched) {
@@ -372,6 +409,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
 
     @Override
     public void remove(final RemovalReason reason) {
+        releaseChunkTicket();
         if (!level().isClientSide && reason.shouldDestroy() && dropItemOnRemove) {
             final Fp5LauncherEntity launcher = resolveLauncher();
             if (launcher != null) {
@@ -467,12 +505,25 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         pitchRate = 0.0F;
         lateralSlip = 0.0D;
         launchTicks = 0;
-        final double targetGroundY = sampleSurfaceY(targetPos.getX() + 0.5D, targetPos.getZ() + 0.5D);
+        previousImpactDistance = Double.MAX_VALUE;
+        final double targetGroundY = sampleSurfaceY(targetPos.getX() + 0.5D, targetPos.getZ() + 0.5D);        // Cruise has to be above the aim point, not merely above the ground under it: a target on a tower or in open
+        // air sits higher than the terrain, and cruising below it would turn the terminal dive into a climb.
+        final double aimY = FullfudServerConfig.SERVER.fp5HonourTargetAltitude.get()
+            ? Math.max(targetPos.getY() + 0.5D, targetGroundY)
+            : targetGroundY;
         flightPhase = FLIGHT_PHASE_CLIMB;
         cruiseAltitude = Math.max(
             getY() + CLIMB_ALTITUDE_MIN + random.nextInt((int) CLIMB_ALTITUDE_RANDOM),
-            targetGroundY + TARGET_ALTITUDE_BUFFER
+            aimY + TARGET_ALTITUDE_BUFFER
         );
+
+        // The straight-out leg and the guidance delay were sized for a strategic shot. Kept absolute they eat
+        // the whole flight of a short one: the missile would fly its 200 blocks locked on the launcher's
+        // heading, pass the target on the way, and then never dive because the terminal phase was gated on the
+        // same lock — which is exactly "it flies off and disappears".
+        final double targetDistance = Math.sqrt(
+            Mth.square(targetPos.getX() + 0.5D - getX()) + Mth.square(targetPos.getZ() + 0.5D - getZ()));
+        guidanceScale = Mth.clamp(targetDistance / FULL_GUIDANCE_PROFILE_RANGE, MIN_GUIDANCE_SCALE, 1.0D);
 
         final Vec3 launchDirection = getCourseDirection();
         climbWaypointX = getX() + launchDirection.x * CLIMB_TARGET_FORWARD;
@@ -578,11 +629,36 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
 
         launchTicks++;
 
+        // Nothing else keeps the chunks under the missile alive. Once it outran the launching player's view
+        // distance its chunk stopped ticking entities, so it froze in mid-air short of the target instead of
+        // arriving: the same ticket the Shahed holds fixes it.
+        ensureChunkTicket();
+
         final Vec3 currentPos = position();
         final Vec3 impactTarget = resolveImpactPoint();
         final Vec3 phaseTarget = resolvePhaseTarget(impactTarget);
         final Vec3 flightMotion = computeFlightMotion(currentPos, phaseTarget, impactTarget);
         spawnExhaustParticles();
+
+        // A missile in the dive covers three or four blocks per tick, so the arrival test has to look ahead by a
+        // whole step: checking only the position it lands on lets it skip over the target point and carry on.
+        final double impactDistance = currentPos.distanceTo(impactTarget);
+        if (flightPhase == FLIGHT_PHASE_TERMINAL) {
+            if (impactDistance <= flightMotion.length() + TERMINAL_DISTANCE_THRESHOLD) {
+                detonate(impactTarget);
+                return;
+            }
+            // Proximity fuse. Guidance can bring the missile close but not onto a point, and once it is past the
+            // target the bearing swings behind it and it flies a wide circle round the aim point for as long as it
+            // exists. Detonating at the closest approach ends the pass that got closest instead.
+            if (impactDistance <= TERMINAL_FUSE_RADIUS && impactDistance > previousImpactDistance) {
+                detonate(impactTarget);
+                return;
+            }
+            previousImpactDistance = impactDistance;
+        } else {
+            previousImpactDistance = Double.MAX_VALUE;
+        }
         final HitResult blockHit = level().clip(new ClipContext(
             currentPos,
             currentPos.add(flightMotion),
@@ -609,7 +685,7 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
             return;
         }
 
-        if (getY() <= level().getMinBuildHeight() + 1) {
+        if (getY() <= level().getMinY() + 1) {
             detonate(position());
         }
     }
@@ -629,10 +705,21 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     private Vec3 resolveImpactPoint() {
         final double targetX = targetPos.getX() + 0.5D;
         final double targetZ = targetPos.getZ() + 0.5D;
-        return new Vec3(targetX, sampleSurfaceY(targetX, targetZ), targetZ);
+        final double surfaceY = sampleSurfaceY(targetX, targetZ);
+        if (!FullfudServerConfig.SERVER.fp5HonourTargetAltitude.get()) {
+            return new Vec3(targetX, surfaceY, targetZ);
+        }
+        // The typed Y decides the aim point, so a rooftop, a tower or a height in open air is a valid target rather
+        // than a request the missile silently rewrites into "hit the ground here". The one thing that cannot be
+        // honoured is a Y under the terrain: the missile would detonate on the surface above it in any case, so an
+        // aim point below the surface is lifted to it instead of pointing the nose into rock.
+        return new Vec3(targetX, Math.max(targetPos.getY() + 0.5D, surfaceY), targetZ);
     }
 
     private Vec3 computeFlightMotion(final Vec3 currentPos, final Vec3 phaseTarget, final Vec3 impactTarget) {
+        if (FullfudServerConfig.SERVER.fp5SimpleGuidance.get()) {
+            return computeSimpleGuidanceMotion(currentPos, phaseTarget, impactTarget);
+        }
         final Vec3 delta = phaseTarget.subtract(currentPos);
         final boolean launchTurnLocked = isLaunchTurnLocked();
         final float targetYaw = Mth.wrapDegrees((float) (-(Mth.atan2(delta.x, delta.z) * Mth.RAD_TO_DEG)) + MODEL_FORWARD_YAW_OFFSET);
@@ -725,6 +812,59 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         return previousMotion.lerp(desiredMotion, steerBlend).normalize().scale(flightSpeed);
     }
 
+    /**
+     * Direct guidance: turn onto the bearing to the current phase target as fast as the configured rate allows and
+     * fly exactly where the nose points.
+     *
+     * <p>What it replaces models a cruise missile honestly — a locked launch heading, turn authority that ramps in
+     * with distance and time, a bank that has to build before the heading moves, and a velocity vector that lags
+     * the airframe. The result is a turn circle of several hundred blocks, so a missile launched at anything but a
+     * distant target sails past it and keeps going. Here the missile simply steers, and the only thing left of the
+     * flight model is the booster speed profile and the climb-cruise-dive phase sequence.
+     */
+    private Vec3 computeSimpleGuidanceMotion(final Vec3 currentPos, final Vec3 phaseTarget, final Vec3 impactTarget) {
+        final Vec3 delta = phaseTarget.subtract(currentPos);
+        final boolean terminal = flightPhase == FLIGHT_PHASE_TERMINAL;
+        final float targetYaw = Mth.wrapDegrees(
+            (float) (-(Mth.atan2(delta.x, delta.z) * Mth.RAD_TO_DEG)) + MODEL_FORWARD_YAW_OFFSET);
+        final float desiredPitch = switch (flightPhase) {
+            case FLIGHT_PHASE_CLIMB -> computeAltitudeHoldPitch(cruiseAltitude - currentPos.y, CLIMB_ALTITUDE_RESPONSE_DISTANCE, 30.0F);
+            // Point straight at the target rather than through computeTerminalPitch, whose 45-degree floor exists to
+            // dress the impact up as a dive. Simple guidance is supposed to fly where it looks, and forcing a dive
+            // steeper than the geometry is what made the missile pass the aim point and orbit it.
+            case FLIGHT_PHASE_TERMINAL -> computeBearingPitch(currentPos, impactTarget);
+            default -> computeAltitudeHoldPitch(cruiseAltitude - currentPos.y, CRUISE_ALTITUDE_RESPONSE_DISTANCE, 20.0F);
+        };
+
+        // At cruise speed the missile covers some 70 blocks a second, so the configured 90 deg/s bends its path on a
+        // radius of about 45 blocks. That is wider than the whole endgame: the last few hundred blocks need several
+        // times the authority or the missile simply circles the target it can see.
+        final float rateBoost = terminal ? TERMINAL_RATE_BOOST : 1.0F;
+        final float yawStep = (float) (FullfudServerConfig.SERVER.fp5TurnDegreesPerSecond.get() / 20.0D) * rateBoost;
+        final float pitchStep = (float) (FullfudServerConfig.SERVER.fp5PitchDegreesPerSecond.get() / 20.0D) * rateBoost;
+        final float yawError = Mth.wrapDegrees(targetYaw - getYRot());
+        final float appliedYaw = Mth.clamp(yawError, -yawStep, yawStep);
+        final float nextYaw = Mth.wrapDegrees(getYRot() + appliedYaw);
+        final float currentCoursePitch = getCoursePitch();
+        final float appliedPitch = Mth.clamp(desiredPitch - currentCoursePitch, -pitchStep, pitchStep);
+        final float nextPitch = Mth.clamp(currentCoursePitch + appliedPitch, -85.0F, 85.0F);
+
+        yawRate = appliedYaw;
+        pitchRate = appliedPitch;
+        lateralSlip = 0.0D;
+        final float targetBank = Mth.clamp(
+            yawStep > 0.0F ? (appliedYaw / yawStep) * SIMPLE_GUIDANCE_BANK_LIMIT : 0.0F,
+            -SIMPLE_GUIDANCE_BANK_LIMIT,
+            SIMPLE_GUIDANCE_BANK_LIMIT
+        );
+        bodyRoll = (float) approachValue(bodyRoll, targetBank, SIMPLE_GUIDANCE_BANK_STEP);
+        setCourseOrientation(nextYaw, nextPitch);
+
+        final double speedTarget = resolveSpeedTarget();
+        flightSpeed = approachValue(flightSpeed, speedTarget, computeSpeedStep(speedTarget));
+        return Vec3.directionFromRotation(nextPitch, nextYaw + MODEL_FORWARD_YAW_OFFSET).scale(flightSpeed);
+    }
+
     private void advanceFlightPhase(final Vec3 impactTarget) {
         if (!hasTarget) {
             return;
@@ -735,9 +875,8 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
                 flightPhase = FLIGHT_PHASE_CRUISE;
             }
         } else if (flightPhase == FLIGHT_PHASE_CRUISE) {
-            if (isLaunchTurnLocked()) {
-                return;
-            }
+            // Deliberately not gated on isLaunchTurnLocked(): a short shot is still inside its straight-out leg
+            // when it arrives, and refusing to dive there is what let it overfly the target and keep going.
             final double dx = impactTarget.x - getX();
             final double dz = impactTarget.z - getZ();
             final double horizontalDistance = Math.sqrt(dx * dx + dz * dz);
@@ -757,10 +896,24 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         return Mth.clamp(desiredPitch, -maxPitch, maxPitch);
     }
 
+    /** Course pitch that points the nose exactly at {@code impactTarget}, nose-up included. */
+    private float computeBearingPitch(final Vec3 currentPos, final Vec3 impactTarget) {
+        final Vec3 delta = impactTarget.subtract(currentPos);
+        final double horizontalDistance = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
+        final float bearingPitch = (float) (-(Mth.atan2(delta.y, Math.max(horizontalDistance, 1.0E-6D)) * Mth.RAD_TO_DEG));
+        return Mth.clamp(bearingPitch, -85.0F, 85.0F);
+    }
+
     private float computeTerminalPitch(final Vec3 currentPos, final Vec3 impactTarget) {
         final Vec3 delta = impactTarget.subtract(currentPos);
         final double horizontalDistance = Math.sqrt(delta.x * delta.x + delta.z * delta.z);
         final float impactPitch = (float) (-(Mth.atan2(delta.y, Math.max(horizontalDistance, 1.0E-6D)) * Mth.RAD_TO_DEG));
+        if (delta.y >= -TERMINAL_DIVE_FLOOR_MARGIN) {
+            // Level with the aim point, or below it. The dive floor is there to make the last seconds look like a
+            // dive rather than a glide; applied here it would drive the missile straight past a target it has come
+            // down to, or under one it has to climb to, so follow the geometry instead — nose-up included.
+            return Mth.clamp(impactPitch, -TERMINAL_MAX_PITCH, TERMINAL_MAX_PITCH);
+        }
         return Mth.clamp(Math.max(impactPitch, TERMINAL_DIVE_PITCH), TERMINAL_DIVE_PITCH, TERMINAL_MAX_PITCH);
     }
 
@@ -785,20 +938,24 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         }
         final double dx = getX() - launchOriginX;
         final double dz = getZ() - launchOriginZ;
-        return Math.sqrt(dx * dx + dz * dz) < INITIAL_STRAIGHT_DISTANCE;
+        return Math.sqrt(dx * dx + dz * dz) < INITIAL_STRAIGHT_DISTANCE * guidanceScale;
     }
 
     private float getTurnAuthority() {
+        final double straightDistance = INITIAL_STRAIGHT_DISTANCE * guidanceScale;
         final double dx = getX() - launchOriginX;
         final double dz = getZ() - launchOriginZ;
         final double distanceFromLaunch = Math.sqrt(dx * dx + dz * dz);
-        if (distanceFromLaunch <= INITIAL_STRAIGHT_DISTANCE) {
+        if (distanceFromLaunch <= straightDistance) {
             return 0.0F;
         }
-        final double distanceAuthority = Mth.clamp((distanceFromLaunch - INITIAL_STRAIGHT_DISTANCE) / TURN_AUTHORITY_RAMP_DISTANCE, 0.0D, 1.0D);
-        final double timeAuthority = launchTicks <= GUIDANCE_DELAY_TICKS
+        final double rampDistance = Math.max(1.0D, TURN_AUTHORITY_RAMP_DISTANCE * guidanceScale);
+        final double distanceAuthority = Mth.clamp((distanceFromLaunch - straightDistance) / rampDistance, 0.0D, 1.0D);
+        final double delayTicks = GUIDANCE_DELAY_TICKS * guidanceScale;
+        final double rampTicks = Math.max(1.0D, GUIDANCE_RAMP_TICKS * guidanceScale);
+        final double timeAuthority = launchTicks <= delayTicks
             ? 0.0D
-            : Mth.clamp((double) (launchTicks - GUIDANCE_DELAY_TICKS) / (double) GUIDANCE_RAMP_TICKS, 0.0D, 1.0D);
+            : Mth.clamp((launchTicks - delayTicks) / rampTicks, 0.0D, 1.0D);
         return (float) (distanceAuthority * timeAuthority);
     }
 
@@ -934,11 +1091,24 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
         tnt.setFuse(0);
         serverLevel.addFreshEntity(tnt);
         serverLevel.explode(tnt, getX(), getY(), getZ(), TNT_POWER, Level.ExplosionInteraction.TNT);
+        BlastLightRefresh.schedule(serverLevel, position(), TNT_POWER);
         tnt.discard();
     }
 
     private void dropAsItem() {
-        spawnAtLocation(createItemStack());
+        EntityDrops.spawnAtLocation(this, createItemStack());
+    }
+
+    private void ensureChunkTicket() {
+        if (level() instanceof ServerLevel serverLevel) {
+            ChunkLoadManager.ensureChunksLoaded(serverLevel, getId(), chunkPosition(), FLAMINGO_CHUNK_RADIUS);
+        }
+    }
+
+    private void releaseChunkTicket() {
+        if (level() instanceof ServerLevel serverLevel) {
+            ChunkLoadManager.releaseChunks(serverLevel, getId());
+        }
     }
 
     private void updateBoundingBox() {
@@ -972,16 +1142,6 @@ public class Fp5FlamingoEntity extends Entity implements GeoEntity {
     @Override
     public EntityDimensions getDimensions(final Pose pose) {
         return FLAMINGO_SIZE;
-    }
-
-    @Override
-    public AABB getBoundingBoxForCulling() {
-        return super.getBoundingBoxForCulling().inflate(1.0D * SCALE, 0.5D * SCALE, 1.0D * SCALE);
-    }
-
-    @Override
-    public Packet<ClientGamePacketListener> getAddEntityPacket() {
-        return NetworkHooks.getEntitySpawningPacket(this);
     }
 
     @Override

@@ -1,11 +1,11 @@
 package com.fullfud.fullfud.core.network.packet;
 
-import com.fullfud.fullfud.core.network.handler.ShahedNetworkHandlers;
+import com.fullfud.fullfud.core.network.FullfudNetwork;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 public record ShahedControlPacket(
     UUID droneId,
@@ -15,7 +15,13 @@ public record ShahedControlPacket(
     float thrustDelta,
     float mousePitchDelta,
     float mouseRollDelta
-) {
+) implements CustomPacketPayload {
+
+    public static final CustomPacketPayload.Type<ShahedControlPacket> TYPE =
+        new CustomPacketPayload.Type<>(FullfudNetwork.id("shahed_control"));
+
+    public static final StreamCodec<FriendlyByteBuf, ShahedControlPacket> STREAM_CODEC =
+        CustomPacketPayload.codec(ShahedControlPacket::write, ShahedControlPacket::decode);
 
     public static ShahedControlPacket decode(final FriendlyByteBuf buffer) {
         final UUID droneId = buffer.readUUID();
@@ -28,7 +34,7 @@ public record ShahedControlPacket(
         return new ShahedControlPacket(droneId, forward, strafe, vertical, thrustDelta, mousePitchDelta, mouseRollDelta);
     }
 
-    public void encode(final FriendlyByteBuf buffer) {
+    public void write(final FriendlyByteBuf buffer) {
         buffer.writeUUID(droneId);
         buffer.writeFloat(forward);
         buffer.writeFloat(strafe);
@@ -38,13 +44,8 @@ public record ShahedControlPacket(
         buffer.writeFloat(mouseRollDelta);
     }
 
-    public void handle(final Supplier<NetworkEvent.Context> contextSupplier) {
-        final NetworkEvent.Context context = contextSupplier.get();
-        if (context.getSender() == null || !context.getDirection().getReceptionSide().isServer()) {
-            context.setPacketHandled(true);
-            return;
-        }
-        context.enqueueWork(() -> ShahedNetworkHandlers.handleControl(this, context.getSender()));
-        context.setPacketHandled(true);
+    @Override
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+        return TYPE;
     }
 }

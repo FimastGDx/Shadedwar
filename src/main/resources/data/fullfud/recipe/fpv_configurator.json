@@ -1,0 +1,18 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "GGG",
+    "CRC",
+    "III"
+  ],
+  "key": {
+    "G": "minecraft:glass_pane",
+    "C": "fullfud:controller",
+    "R": "minecraft:redstone",
+    "I": "fullfud:ingot_steel"
+  },
+  "result": {
+    "id": "fullfud:fpv_configurator",
+    "count": 1
+  }
+}

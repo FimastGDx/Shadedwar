@@ -1,12 +1,12 @@
 pluginManagement {
     repositories {
-        maven { url = "https://maven.minecraftforge.net" }
+        maven {
+            name = "Fabric"
+            url = "https://maven.fabricmc.net/"
+        }
         gradlePluginPortal()
         mavenCentral()
     }
 }
 
 rootProject.name = 'Shadedwar'
-
-include("lattice")
-project(":lattice").projectDir = file("lattice")

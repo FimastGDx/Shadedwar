@@ -1,6 +1,10 @@
 package com.fullfud.fullfud.client.screen;
 
+import com.fullfud.fullfud.FullfudMod;
 import com.fullfud.fullfud.client.ShahedClientHandler;
+import com.fullfud.fullfud.client.warning.DroneWarning;
+import com.fullfud.fullfud.client.warning.DroneWarningOverlay;
+import com.fullfud.fullfud.client.warning.DroneWarningSources;
 import com.fullfud.fullfud.common.entity.RebEmitterEntity;
 import com.fullfud.fullfud.common.entity.ShahedDroneEntity;
 import com.fullfud.fullfud.common.menu.ShahedMonitorMenu;
@@ -15,10 +19,12 @@ import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
 import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
 import net.minecraft.resources.ResourceLocation;
+import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Inventory;
@@ -27,15 +33,29 @@ import net.minecraft.world.phys.Vec3;
 import org.joml.Quaternionf;
 import org.lwjgl.glfw.GLFW;
 
+import java.util.List;
+
 public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMenu> {
     private static final int HUD_MARGIN = 28;
+    /**
+     * 1.20.5 dropped {@code TextureManager.register(String, DynamicTexture)}, which used to mint a unique
+     * id per call, in favour of a caller-supplied one. A fixed id is what we want anyway: re-registering
+     * closes the texture it replaces, so reopening the monitor or resizing no longer leaks the old one.
+     */
+    private static final ResourceLocation NOISE_TEXTURE_ID =
+        ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "shahed_noise");
 
     private DynamicTexture noiseTexture;
-    private ResourceLocation noiseTextureLocation;
     private int noiseTexWidth;
     private int noiseTexHeight;
     private float jammerNoiseOverride;
     private boolean jammerDisablesControls;
+    /**
+     * The noise level actually drawn over the feed this frame. {@code renderBg} runs before the status overlay,
+     * so the LOW_SIGNAL alert can use the same figure the picture is degraded by — distance, the drone's own
+     * noise reading and any jammer in range — rather than deriving a second, disagreeing one.
+     */
+    private float lastDisplayNoise;
 
     private int controlTicker;
     private Entity previousCamera;
@@ -77,12 +97,14 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
             noiseTexWidth = this.width;
             noiseTexHeight = this.height;
             noiseTexture = new DynamicTexture(noiseTexWidth, noiseTexHeight, true);
-            noiseTextureLocation = minecraft.getTextureManager().register("shahed_noise", noiseTexture);
+            minecraft.getTextureManager().register(NOISE_TEXTURE_ID, noiseTexture);
         }
         cameraOverridden = false;
         hasCameraFeed = false;
         jammerNoiseOverride = 0.0F;
         jammerDisablesControls = false;
+        lastDisplayNoise = 0.0F;
+        DroneWarningSources.reset();
         captureControlCursor();
         resetMouseLookState();
         ensureCamera();
@@ -157,12 +179,10 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
         resetMouseLookState();
         restoreControlCursor();
         ShahedClientHandler.clearMonitorCameraShake();
+        DroneWarningSources.reset();
         requestCameraRelease();
         restoreCamera();
-        if (noiseTexture != null) {
-            noiseTexture.close();
-            noiseTexture = null;
-        }
+        releaseNoiseTexture();
     }
 
     @Override
@@ -174,10 +194,23 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
         resetKeyStates();
         resetMouseLookState();
         restoreControlCursor();
-        if (noiseTexture != null) {
-            noiseTexture.close();
-            noiseTexture = null;
+        releaseNoiseTexture();
+    }
+
+    /**
+     * The texture manager holds the noise texture under {@link #NOISE_TEXTURE_ID} now, so it has to be
+     * released there rather than just closed — release closes it and drops the mapping.
+     */
+    private void releaseNoiseTexture() {
+        if (noiseTexture == null) {
+            return;
         }
+        if (minecraft != null) {
+            minecraft.getTextureManager().release(NOISE_TEXTURE_ID);
+        } else {
+            noiseTexture.close();
+        }
+        noiseTexture = null;
     }
 
     @Override
@@ -185,8 +218,10 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
         drawFullPanel(graphics);
     }
 
+    // 1.20.2 gave renderBackground the mouse position and partial tick; the override still exists only to
+    // suppress the vanilla backdrop behind the camera feed.
     @Override
-    public void renderBackground(final GuiGraphics graphics) {
+    public void renderBackground(final GuiGraphics graphics, final int mouseX, final int mouseY, final float partialTick) {
     }
 
     @Override
@@ -222,6 +257,7 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
         noiseOpacity = Math.max(noiseOpacity, computeNoiseOpacityByDistance(distance));
         noiseOpacity = Math.max(noiseOpacity, jammerNoiseOverride);
         final float displayNoise = toDisplayNoise(noiseOpacity);
+        lastDisplayNoise = displayNoise;
 
         if (displayNoise > 0.0F) {
             renderTvNoise(graphics, monitorX, monitorY, monitorWidth, monitorHeight, displayNoise);
@@ -246,16 +282,17 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
             noiseTexWidth = width;
             noiseTexHeight = height;
             noiseTexture = new DynamicTexture(noiseTexWidth, noiseTexHeight, true);
-            noiseTextureLocation = minecraft.getTextureManager().register("shahed_noise", noiseTexture);
+            minecraft.getTextureManager().register(NOISE_TEXTURE_ID, noiseTexture);
         }
 
         final long time = this.minecraft.level != null ? this.minecraft.level.getGameTime() : System.currentTimeMillis() / 50L;
         updateNoiseTexture(time);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
-        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, Mth.clamp(opacity, 0.0F, 1.0F));
-        graphics.blit(noiseTextureLocation, x, y, 0, 0, width, height, noiseTexWidth, noiseTexHeight);
-        RenderSystem.setShaderColor(1.0F, 1.0F, 1.0F, 1.0F);
+        // 1.21.1 rebuilt blit around a RenderType lookup and a per-quad ARGB tint, which is where the
+        // opacity that used to go through RenderSystem.setShaderColor now belongs.
+        graphics.blit(RenderType::guiTextured, NOISE_TEXTURE_ID, x, y, 0.0F, 0.0F, width, height,
+            noiseTexWidth, noiseTexHeight, ARGB.white(Mth.clamp(opacity, 0.0F, 1.0F)));
         RenderSystem.disableBlend();
     }
 
@@ -271,8 +308,10 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
                 seed ^= (seed >> 7);
                 seed ^= (seed << 17);
                 int grey = (int) (seed & 0xFFL);
+                // setPixel replaced setPixelRGBA in 1.21.2 and takes ARGB rather than ABGR; a grey has the
+                // same packing either way.
                 int color = 0xFF000000 | (grey << 16) | (grey << 8) | grey;
-                image.setPixelRGBA(x, y, color);
+                image.setPixel(x, y, color);
             }
         }
         noiseTexture.upload();
@@ -322,7 +361,10 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
         float strongest = 0.0F;
 
         for (final RebEmitterEntity emitter : minecraft.level.getEntitiesOfClass(RebEmitterEntity.class, searchBox)) {
-            if (!emitter.hasBattery() || emitter.getChargeTicks() <= 0) {
+            // Not hasBattery(): a listening-only emitter has a live pack but no transmitter, and asking
+            // the wrong question here is what used to fill the monitor with noise and cut the controls
+            // while the dish was in DETECT. isJamming() is what the drones themselves ask.
+            if (!emitter.isJamming()) {
                 continue;
             }
             final double dx = emitter.getX() - dronePos.x;
@@ -419,6 +461,37 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
         if (status.signalLost()) {
             graphics.drawString(font, Component.translatable("message.fullfud.monitor.turn"), width / 2 - 70, height / 2, 0xFFFF5555, false);
         }
+
+        drawWarnings(graphics, status, partialTick);
+    }
+
+    /**
+     * The alert block, centred below the reticle: red CAUTION lines above amber WARN lines, all flashing on the
+     * shared clock in {@link DroneWarningOverlay} so they pulse together and sound once between them.
+     */
+    private void drawWarnings(final GuiGraphics graphics, final ShahedStatusPacket status, final float partialTick) {
+        final float signalQuality = Mth.clamp(1.0F - lastDisplayNoise, 0.0F, 1.0F);
+        final List<DroneWarning> active = DroneWarningOverlay.prioritise(
+            DroneWarningSources.collectShahed(minecraft, resolveDrone(), status, signalQuality, partialTick)
+        );
+        // Called even with nothing up: this is what advances the flash clock and clears the audio state.
+        final float brightness = DroneWarningOverlay.update(active);
+        if (active.isEmpty() || brightness <= 0.02F) {
+            return;
+        }
+        int y = height / 2 + 30;
+        for (final DroneWarning warning : active) {
+            final Component line = Component.literal(warning.text());
+            graphics.drawString(
+                font,
+                line,
+                (width - font.width(line)) / 2,
+                y,
+                DroneWarningOverlay.textColor(warning.level(), brightness),
+                false
+            );
+            y += 11;
+        }
     }
 
     private void drawOverlayPanel(final GuiGraphics graphics, final int x, final int y, final int width, final int height) {
@@ -475,7 +548,9 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
         dispatcher.setRenderShadow(false);
         final MultiBufferSource.BufferSource bufferSource = mc.renderBuffers().bufferSource();
         RenderSystem.enableDepthTest();
-        dispatcher.render(drone, 0.0D, 0.0D, 0.0D, 0.0F, partialTick, poseStack, bufferSource, LightTexture.FULL_BRIGHT);
+        // 1.21.2 dropped the yaw argument: body rotation is extracted into the render state now, and the
+        // yaw this preview wants is already baked into the pose above.
+        dispatcher.render(drone, 0.0D, 0.0D, 0.0D, partialTick, poseStack, bufferSource, LightTexture.FULL_BRIGHT);
         bufferSource.endBatch();
         dispatcher.setRenderShadow(true);
         dispatcher.overrideCameraOrientation(new Quaternionf());

@@ -1,0 +1,9 @@
+{
+  "model": {
+    "type": "minecraft:special",
+    "base": "fullfud:item/monitor_control",
+    "model": {
+      "type": "geckolib:geckolib"
+    }
+  }
+}

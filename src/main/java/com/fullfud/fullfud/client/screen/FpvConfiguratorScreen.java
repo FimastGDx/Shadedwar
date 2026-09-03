@@ -1,7 +1,7 @@
 package com.fullfud.fullfud.client.screen;
 
 import com.fullfud.fullfud.common.entity.drone.FpvDroneConfig;
-import com.fullfud.fullfud.core.network.FullfudNetwork;
+import com.fullfud.fullfud.core.network.FullfudClientNetwork;
 import com.fullfud.fullfud.core.network.packet.UpdateFpvDroneConfigPacket;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractSliderButton;
@@ -9,13 +9,13 @@ import net.minecraft.client.gui.components.EditBox;
 import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.network.chat.Component;
 import net.minecraft.util.Mth;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
 
 import java.util.Locale;
 import java.util.UUID;
 
-@OnlyIn(Dist.CLIENT)
+@Environment(EnvType.CLIENT)
 public class FpvConfiguratorScreen extends Screen {
     private static final int MAX_CONTENT_WIDTH = 760;
     private static final int SCREEN_MARGIN = 24;
@@ -300,7 +300,7 @@ public class FpvConfiguratorScreen extends Screen {
     private void saveAndClose() {
         workingConfig.setDroneName(droneNameField.getValue());
         if (dirty && droneId != null) {
-            FullfudNetwork.getChannel().sendToServer(new UpdateFpvDroneConfigPacket(droneId, workingConfig.save()));
+            FullfudClientNetwork.sendToServer(new UpdateFpvDroneConfigPacket(droneId, workingConfig.save()));
         }
         if (minecraft != null) {
             minecraft.setScreen(null);

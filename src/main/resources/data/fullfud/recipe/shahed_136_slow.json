@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "fullfud:shahed_136",
+    "minecraft:redstone"
+  ],
+  "result": {
+    "id": "fullfud:shahed_136_slow",
+    "count": 1
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "IPI",
+    "IBI",
+    "PPP"
+  ],
+  "key": {
+    "I": "fullfud:ingot_steel",
+    "P": "fullfud:insert_steel",
+    "B": "fullfud:steel_block"
+  },
+  "result": {
+    "id": "fullfud:launcherfp5",
+    "count": 1
+  }
+}

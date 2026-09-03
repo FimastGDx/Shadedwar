@@ -1,30 +1,31 @@
 package com.fullfud.fullfud.core.network.packet;
 
-import com.fullfud.fullfud.core.network.handler.FpvNetworkHandlers;
+import com.fullfud.fullfud.core.network.FullfudNetwork;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
-public record UpdateFpvDroneConfigPacket(UUID droneId, CompoundTag configTag) {
+public record UpdateFpvDroneConfigPacket(UUID droneId, CompoundTag configTag) implements CustomPacketPayload {
+
+    public static final CustomPacketPayload.Type<UpdateFpvDroneConfigPacket> TYPE =
+        new CustomPacketPayload.Type<>(FullfudNetwork.id("update_fpv_drone_config"));
+
+    public static final StreamCodec<FriendlyByteBuf, UpdateFpvDroneConfigPacket> STREAM_CODEC =
+        CustomPacketPayload.codec(UpdateFpvDroneConfigPacket::write, UpdateFpvDroneConfigPacket::decode);
     public static UpdateFpvDroneConfigPacket decode(final FriendlyByteBuf buffer) {
         return new UpdateFpvDroneConfigPacket(buffer.readUUID(), buffer.readNbt());
     }
 
-    public void encode(final FriendlyByteBuf buffer) {
+    public void write(final FriendlyByteBuf buffer) {
         buffer.writeUUID(droneId);
         buffer.writeNbt(configTag);
     }
 
-    public void handle(final Supplier<NetworkEvent.Context> contextSupplier) {
-        final NetworkEvent.Context context = contextSupplier.get();
-        if (!context.getDirection().getReceptionSide().isServer()) {
-            context.setPacketHandled(true);
-            return;
-        }
-        context.enqueueWork(() -> FpvNetworkHandlers.handleUpdateConfigurator(this, context.getSender()));
-        context.setPacketHandled(true);
+    @Override
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+        return TYPE;
     }
 }

@@ -1,0 +1,28 @@
+{
+  "parent": "fullfud:reb",
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "minecraft:bell"
+    },
+    "title": {
+      "translate": "advancements.fullfud.reb_warning.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.reb_warning.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true,
+    "frame": "goal"
+  },
+  "requirements": [
+    [
+      "granted"
+    ]
+  ]
+}

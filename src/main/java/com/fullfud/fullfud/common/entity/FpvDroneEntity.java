@@ -1,17 +1,29 @@
 package com.fullfud.fullfud.common.entity;
 
 import com.fullfud.fullfud.common.entity.drone.DronePhysics;
+import com.fullfud.fullfud.common.entity.drone.DroneServiceBay;
 import com.fullfud.fullfud.common.entity.drone.FpvDroneConfig;
 import com.fullfud.fullfud.common.entity.drone.DronePreset;
+import com.fullfud.fullfud.common.entity.drone.WarheadCharge;
 import com.fullfud.fullfud.common.item.FpvConfiguratorItem;
 import com.fullfud.fullfud.common.item.FpvControllerItem;
 import com.fullfud.fullfud.common.item.FpvGogglesItem;
+import com.fullfud.fullfud.common.item.RebBatteryItem;
+import com.fullfud.fullfud.common.item.ScrewdriverItem;
+import com.fullfud.fullfud.common.menu.DroneServiceMenu;
+import com.fullfud.fullfud.core.BlastLightRefresh;
+import com.fullfud.fullfud.core.EntityDrops;
+import com.fullfud.fullfud.core.FullfudAdvancements;
+import com.fullfud.fullfud.core.FullfudDataComponents;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import com.fullfud.fullfud.core.DroneExplosionEffects;
 import com.fullfud.fullfud.core.DroneExplosionLimiter;
 import com.fullfud.fullfud.core.RemoteControlFailsafe;
 import com.fullfud.fullfud.core.RemotePlayerProtection;
 import com.fullfud.fullfud.core.config.FullfudClientConfig;
+import com.fullfud.fullfud.core.config.FullfudServerConfig;
+import com.fullfud.fullfud.core.data.FpvDroneLocations;
+import com.fullfud.fullfud.core.data.PersistentData;
 import com.fullfud.fullfud.core.network.FullfudNetwork;
 import com.fullfud.fullfud.core.network.packet.DroneAudioLoopPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioOneShotPacket;
@@ -22,8 +34,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
 import com.fullfud.fullfud.core.ChunkLoadManager;
 import net.minecraft.network.syncher.EntityDataAccessor;
@@ -58,26 +68,26 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.phys.HitResult;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.level.ClipContext;
-import net.minecraftforge.network.NetworkHooks;
-import net.minecraftforge.network.PacketDistributor;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import software.bernie.geckolib.animatable.GeoEntity;
-import software.bernie.geckolib.core.animatable.instance.AnimatableInstanceCache;
-import software.bernie.geckolib.core.animation.AnimatableManager;
-import software.bernie.geckolib.core.animation.AnimationController;
-import software.bernie.geckolib.core.animation.AnimationState;
-import software.bernie.geckolib.core.animation.RawAnimation;
-import software.bernie.geckolib.core.object.PlayState;
+import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
+import software.bernie.geckolib.animation.AnimatableManager;
+import software.bernie.geckolib.animation.AnimationController;
+import software.bernie.geckolib.animation.AnimationState;
+import software.bernie.geckolib.animation.RawAnimation;
+import software.bernie.geckolib.animation.PlayState;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.List;
 
 public class FpvDroneEntity extends Entity implements GeoEntity {
+    private static final org.slf4j.Logger DIAGNOSTIC_LOGGER = com.mojang.logging.LogUtils.getLogger();
     public static final String PLAYER_REMOTE_TAG = "fullfud_fpv_remote";
 
     private static final String PLAYER_TAG_DRONE = "Drone";
@@ -142,6 +152,8 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     private static final String TAG_SIGNAL_PENETRATION_SCALE = "SignalPenetrationScale";
     private static final String TAG_PRESET = "Preset";
     private static final String TAG_CONFIG = "DroneConfig";
+    private static final String TAG_SERVICE_BAY = "ServiceBay";
+    private static final String TAG_CARGO = "Cargo";
 
     private final AnimatableInstanceCache animationCache = GeckoLibUtil.createInstanceCache(this);
     private final Quaternionf qRotation = new Quaternionf();
@@ -158,6 +170,19 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     private DronePreset dronePreset = DronePreset.STANDARD_STRIKE;
     private FpvDroneConfig droneConfig = FpvDroneConfig.fromPreset(DronePreset.STANDARD_STRIKE);
     private final DronePhysics dronePhysics = new DronePhysics();
+
+    /**
+     * Whether this airframe has a cargo pod. A property of the airframe rather than of the
+     * {@link DronePreset}, because a hauler flies like the standard drone it is built from — the only
+     * difference is the nine slots, which the physics model has no opinion about.
+     */
+    private boolean cargo;
+
+    /**
+     * The loadout, created lazily because the slot count depends on {@link #cargo}, which the item form
+     * sets after construction.
+     */
+    private DroneServiceBay serviceBay;
 
     private float targetThrottle;
     private float throttleOutput;
@@ -183,6 +208,10 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     private FpvControlPacket queuedControl;
     private UUID queuedControllerId;
     private int controlTimeoutTicks;
+    /** Why the last {@link #applyControl} call did or did not take effect; read by the diagnostic log only. */
+    private String lastControlOutcome = "none";
+    private FpvControlPacket lastControlPacket;
+    private long lastDiagnosticLogMs;
     // Optional mode: keep drone chunks loaded even without a controlling player.
     private boolean keepChunksLoadedWithoutPlayer;
 
@@ -220,6 +249,9 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     private static final double FPV_AUDIO_RANGE_BLOCKS = 96.0D;
     private static final float FPV_FIREBALL_POWER = 3.0F;
 
+    /** How far a player may drift from an open service bay before it closes. 8 blocks. */
+    private static final double SERVICE_REACH_SQR = 64.0D;
+
     public FpvDroneEntity(final EntityType<? extends FpvDroneEntity> type, final Level level) {
         super(type, level);
         this.noPhysics = false;
@@ -250,26 +282,101 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         return canAccess(player);
     }
 
+    public boolean isCargo() {
+        return this.cargo;
+    }
+
+    /**
+     * Must be called before anything touches {@link #serviceBay}, because it decides how many slots the
+     * bay has. {@code FpvDroneItem.useOn} calls it right after construction; a load from NBT calls it
+     * from {@code readAdditionalSaveData} before restoring the contents.
+     */
+    public void setCargo(final boolean cargo) {
+        if (this.cargo == cargo && this.serviceBay != null) {
+            return;
+        }
+        this.cargo = cargo;
+        this.serviceBay = null;
+    }
+
+    public DroneServiceBay getServiceBay() {
+        if (this.serviceBay == null) {
+            this.serviceBay = new DroneServiceBay(
+                this.cargo ? DroneServiceBay.CARGO_SLOTS : 0,
+                WarheadCharge.FPV_MAX.tier(),
+                null,
+                this::canServiceFrom
+            );
+        }
+        return this.serviceBay;
+    }
+
+    /** The charge currently bolted in, or {@link WarheadCharge#NONE}. An FPV with none does not explode. */
+    public WarheadCharge getWarhead() {
+        return getServiceBay().warhead();
+    }
+
+    /** The other half of {@link #dropAsItem()}: puts the stack's loadout back onto a freshly placed drone. */
+    public void restoreLoadout(final ItemStack stack) {
+        getServiceBay().readFromStack(stack);
+        final Integer battery = stack.get(FullfudDataComponents.DRONE_BATTERY_TICKS);
+        if (battery != null) {
+            entityData.set(DATA_BATTERY, Mth.clamp(battery, 0, MAX_BATTERY_TICKS));
+        }
+    }
+
+    private boolean canServiceFrom(final Player player) {
+        return isAlive() && canAccess(player) && player.distanceToSqr(this) <= SERVICE_REACH_SQR;
+    }
+
+    /**
+     * Pulls a battery out of the power slot and into the pack. The pack is a tick counter rather than a
+     * stack, so the item is consumed: a spent FPV pack is gone, and a fresh one has to be crafted from
+     * lithium. Installing tops the pack up rather than replacing it, which means a nearly-full drone
+     * wastes part of the pack — the player decides when to plug one in.
+     */
+    private void installPowerFromBay() {
+        final DroneServiceBay bay = getServiceBay();
+        final ItemStack power = bay.powerStack();
+        if (power.isEmpty() || !(power.getItem() instanceof RebBatteryItem)) {
+            return;
+        }
+        final int current = getBatteryTicks();
+        if (current >= MAX_BATTERY_TICKS) {
+            return;
+        }
+        final float charge = RebBatteryItem.getChargeTicks(power) / (float) RebBatteryItem.MAX_CHARGE_TICKS;
+        final int transfer = Math.round(MAX_BATTERY_TICKS * Mth.clamp(charge, 0.0F, 1.0F));
+        if (transfer <= 0) {
+            return;
+        }
+        power.shrink(1);
+        bay.setChanged();
+        entityData.set(DATA_BATTERY, Math.min(MAX_BATTERY_TICKS, current + transfer));
+    }
+
     private void refreshPhysicsConfiguration() {
         this.dronePhysics.applyPreset(this.dronePreset);
         this.dronePhysics.applyConfig(this.droneConfig);
     }
 
     @Override
-    protected void defineSynchedData() {
-        this.entityData.define(DATA_ARMED, false);
-        this.entityData.define(DATA_THRUST, 0.0F);
-        this.entityData.define(DATA_ROLL, 0.0F);
-        this.entityData.define(DATA_CONTROLLER, Optional.empty());
-        this.entityData.define(DATA_REMOTE_ACTIVE, false);
-        this.entityData.define(DATA_BATTERY, MAX_BATTERY_TICKS);
-        this.entityData.define(DATA_SIGNAL_QUALITY, 1.0F);
-        this.entityData.define(DATA_SIGNAL_RANGE_SCALE, 1.0F);
-        this.entityData.define(DATA_SIGNAL_PENETRATION_SCALE, 1.0F);
-        this.entityData.define(DATA_QX, 0.0F);
-        this.entityData.define(DATA_QY, 0.0F);
-        this.entityData.define(DATA_QZ, 0.0F);
-        this.entityData.define(DATA_QW, 1.0F);
+    protected void defineSynchedData(final SynchedEntityData.Builder builder) {
+        builder.define(DATA_ARMED, false);
+        builder.define(DATA_THRUST, 0.0F);
+        builder.define(DATA_ROLL, 0.0F);
+        builder.define(DATA_CONTROLLER, Optional.empty());
+        builder.define(DATA_REMOTE_ACTIVE, false);
+        // A fresh airframe ships without a pack. One has to be crafted and installed through the
+        // service bay, which is also what grounds a drone the player has not maintained.
+        builder.define(DATA_BATTERY, 0);
+        builder.define(DATA_SIGNAL_QUALITY, 1.0F);
+        builder.define(DATA_SIGNAL_RANGE_SCALE, 1.0F);
+        builder.define(DATA_SIGNAL_PENETRATION_SCALE, 1.0F);
+        builder.define(DATA_QX, 0.0F);
+        builder.define(DATA_QY, 0.0F);
+        builder.define(DATA_QZ, 0.0F);
+        builder.define(DATA_QW, 1.0F);
     }
 
     public void setSignalScales(final double rangeScale, final double penetrationScale) {
@@ -305,6 +412,11 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     protected void readAdditionalSaveData(final CompoundTag tag) {
         if (tag.contains(TAG_PRESET)) {
             setDronePreset(DronePreset.fromOrdinal(tag.getInt(TAG_PRESET)));
+        }
+        // Before the bay is touched: it decides the slot count.
+        setCargo(tag.getBoolean(TAG_CARGO));
+        if (tag.contains(TAG_SERVICE_BAY, Tag.TAG_LIST)) {
+            getServiceBay().load(tag.getList(TAG_SERVICE_BAY, Tag.TAG_COMPOUND), registryAccess());
         }
         if (tag.contains(TAG_CONFIG, Tag.TAG_COMPOUND)) {
             setDroneConfig(FpvDroneConfig.fromTag(tag.getCompound(TAG_CONFIG)));
@@ -361,6 +473,8 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         tag.putFloat(TAG_THRUST, targetThrottle);
         tag.putDouble(TAG_ROLL, droneRoll);
         tag.putInt(TAG_BATTERY, getBatteryTicks());
+        tag.putBoolean(TAG_CARGO, this.cargo);
+        tag.put(TAG_SERVICE_BAY, getServiceBay().save(registryAccess()));
         
         Vec3 vel = getDeltaMovement();
         final ListTag velocityList = new ListTag();
@@ -405,6 +519,8 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
                 entityData.set(DATA_BATTERY, Math.max(0, currentBat - drain));
             }
         } else {
+            // Only on the ground: swapping a pack in mid-air would be free refuelling.
+            installPowerFromBay();
             targetThrottle = 0.0F;
             inputPitch = 0.0F;
             inputRoll = 0.0F;
@@ -443,6 +559,12 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         } else {
             releaseChunkTicket();
         }
+        // Once every two seconds is enough to call the drone back later; a drone that is not moving does not
+        // even mark the save dirty.
+        if (tickCount % 40 == 0) {
+            rememberLocation();
+            checkLongFlightAdvancement();
+        }
         updateSimplePhysics();
         updateControllerBinding();
         final ServerPlayer controller = getController();
@@ -476,7 +598,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             List<Entity> collisions = level().getEntities(this, getBoundingBox().inflate(0.2D), e -> !e.isSpectator() && e.isPickable());
             for (Entity entity : collisions) {
                 if (entity instanceof ServerPlayer sp && entityData.get(DATA_CONTROLLER).map(sp.getUUID()::equals).orElse(false)) continue;
-                if (isExplosivePreset() && level() instanceof ServerLevel serverLevel) {
+                if (getWarhead().isPresent() && level() instanceof ServerLevel serverLevel) {
                     DroneExplosionEffects.applyDirectImpactVehicleDamage(serverLevel, this, controller, entity);
                 }
                 destroyOnImpact(resolveEntityImpactOrigin(moveStart, moveEnd, entity));
@@ -493,6 +615,48 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         entityData.set(DATA_THRUST, throttleOutput);
         entityData.set(DATA_ROLL, (float) droneRoll);
         syncQuaternionToData();
+        logControlDiagnostics();
+    }
+
+    private void logControlDiagnostics() {
+        if (!FullfudServerConfig.SERVER.fpvDiagnosticLog.get()) {
+            return;
+        }
+        if (!entityData.get(DATA_CONTROLLER).isPresent()) {
+            return;
+        }
+        final long now = System.currentTimeMillis();
+        if (now - lastDiagnosticLogMs < 1000L) {
+            return;
+        }
+        lastDiagnosticLogMs = now;
+
+        final FpvControlPacket packet = lastControlPacket;
+        final Vec3 velocity = getDeltaMovement();
+        DIAGNOSTIC_LOGGER.info(
+            "[FPV-DIAG/server] id={} outcome={} armed={} battery={} signal={} timeout={} "
+                + "recv[p={} r={} y={} throttle={} arm={}] applied[p={} r={} y={} target={} output={}] "
+                + "vel[x={} y={} z={}]",
+            getId(),
+            lastControlOutcome,
+            isArmed(),
+            getBatteryTicks(),
+            String.format(java.util.Locale.ROOT, "%.3f", getSignalQuality()),
+            controlTimeoutTicks,
+            packet == null ? "-" : String.format(java.util.Locale.ROOT, "%.3f", packet.pitchInput()),
+            packet == null ? "-" : String.format(java.util.Locale.ROOT, "%.3f", packet.rollInput()),
+            packet == null ? "-" : String.format(java.util.Locale.ROOT, "%.3f", packet.yawInput()),
+            packet == null ? "-" : String.format(java.util.Locale.ROOT, "%.3f", packet.throttle()),
+            packet == null ? "-" : String.valueOf(packet.armAction()),
+            String.format(java.util.Locale.ROOT, "%.3f", inputPitch),
+            String.format(java.util.Locale.ROOT, "%.3f", inputRoll),
+            String.format(java.util.Locale.ROOT, "%.3f", inputYaw),
+            String.format(java.util.Locale.ROOT, "%.3f", targetThrottle),
+            String.format(java.util.Locale.ROOT, "%.3f", throttleOutput),
+            String.format(java.util.Locale.ROOT, "%.3f", velocity.x),
+            String.format(java.util.Locale.ROOT, "%.3f", velocity.y),
+            String.format(java.util.Locale.ROOT, "%.3f", velocity.z)
+        );
     }
 
     private void broadcastEngineAudio() {
@@ -526,7 +690,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
                 if (volume <= 0.001F) {
                     continue;
                 }
-                FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> player),
+                FullfudNetwork.sendToPlayer(player,
                     new DroneAudioOneShotPacket(AUDIO_TYPE_FPV, kind, getUUID(), getX(), getY(), getZ(), volume, 1.0F));
             }
         }
@@ -545,7 +709,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
                 if (!controlling && isOccluded(serverLevel, player)) {
                     volume *= 0.35F;
                 }
-                FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> player),
+                FullfudNetwork.sendToPlayer(player,
                     new DroneAudioLoopPacket(AUDIO_TYPE_FPV, getUUID(), getX(), getY(), getZ(), volume, pitch, true));
             }
         } else if (lastLoopAudio) {
@@ -555,7 +719,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
                 if (!controlling && distSqr > rangeSqr) {
                     continue;
                 }
-                FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> player),
+                FullfudNetwork.sendToPlayer(player,
                     new DroneAudioLoopPacket(AUDIO_TYPE_FPV, getUUID(), getX(), getY(), getZ(), 0.0F, 1.0F, false));
             }
         }
@@ -611,9 +775,9 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         }
         
         if (currentSignal > 0.0F) {
-            List<RebEmitterEntity> rebs = level().getEntitiesOfClass(RebEmitterEntity.class, 
-                this.getBoundingBox().inflate(300.0D), 
-                e -> e.hasBattery() && e.hasFinishedStartup());
+            List<RebEmitterEntity> rebs = level().getEntitiesOfClass(RebEmitterEntity.class,
+                this.getBoundingBox().inflate(300.0D),
+                RebEmitterEntity::isJamming);
                 
             float maxJamming = 0.0F;
             for (RebEmitterEntity reb : rebs) {
@@ -674,8 +838,9 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         return lastSignalOcclusion;
     }
     
+    // 1.21.2 dropped lerpTo's trailing teleport flag; the interpolation is otherwise unchanged.
     @Override
-    public void lerpTo(double x, double y, double z, float yaw, float pitch, int posRotationIncrements, boolean teleport) {
+    public void lerpTo(double x, double y, double z, float yaw, float pitch, int posRotationIncrements) {
         this.lerpX = x;
         this.lerpY = y;
         this.lerpZ = z;
@@ -758,6 +923,41 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         this.droneRoll = Mth.wrapDegrees(newRoll);
     }
 
+    /**
+     * Runs the angle-mode assist when the pilot is hands-off on pitch and roll. Yaw is deliberately not part of
+     * the test: turning the nose while the airframe stays level is exactly what the assist is for.
+     */
+    private void applyLevelAssist(
+        final float dt,
+        final float pitchInput,
+        final float rollInput,
+        final float mousePitchDelta,
+        final float mouseRollDelta
+    ) {
+        if (!FullfudServerConfig.SERVER.fpvLevelAssist.get()) {
+            return;
+        }
+        if (dronePhysics.isAngleModeActive()) {
+            // Angle mode already commands level whenever the sticks are centred, and it owns the rate limit.
+            return;
+        }
+        if (dronePhysics.isFlightMode3d()) {
+            return;
+        }
+        final float threshold = (float) (double) FullfudServerConfig.SERVER.fpvLevelAssistInputThreshold.get();
+        if (Math.abs(pitchInput) > threshold || Math.abs(rollInput) > threshold) {
+            return;
+        }
+        if (Math.abs(mousePitchDelta) > 1.0E-4F || Math.abs(mouseRollDelta) > 1.0E-4F) {
+            return;
+        }
+        dronePhysics.applyLevelAssist(
+            dt,
+            (float) (double) FullfudServerConfig.SERVER.fpvLevelAssistGain.get(),
+            (float) (double) FullfudServerConfig.SERVER.fpvLevelAssistMaxDegreesPerSecond.get()
+        );
+    }
+
     private void updateSimplePhysics() {
         final float dt = (float) TICK_SECONDS;
 
@@ -773,20 +973,58 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         // Sync current velocity into physics engine
         dronePhysics.setVelocity(linearVelocity);
         dronePhysics.setOrientation(qRotation);
+        // Config is read uncached everywhere else in the mod, so push it in per tick rather than caching it here.
+        dronePhysics.setAngleMode(
+            FullfudServerConfig.SERVER.fpvAngleMode.get(),
+            (float) (double) FullfudServerConfig.SERVER.fpvAngleModeMaxTiltDegrees.get(),
+            (float) (double) FullfudServerConfig.SERVER.fpvAngleModeGain.get(),
+            (float) (double) FullfudServerConfig.SERVER.fpvAngleModeMaxDegreesPerSecond.get(),
+            (float) (double) FullfudServerConfig.SERVER.fpvAngleModeYawDegreesPerSecond.get()
+        );
 
         // Run RK4 physics simulation
-        Vec3 displacement = dronePhysics.simulate(
-            dt,
-            throttle,
-            rInput,
-            pInput,
-            yInput,
-            mousePitchDelta,
-            mouseRollDelta,
-            dronePhysics.isFlightMode3d()
-        );
+        final boolean simpleFlight = !freeFall
+            && FullfudServerConfig.SERVER.fpvSimpleFlight.get()
+            && !dronePhysics.isFlightMode3d();
+        Vec3 displacement;
+        if (simpleFlight) {
+            // The mouse steers here rather than leaning the airframe: sideways movement is the drone's own axis and
+            // the mouse only points the nose, so a stray movement turns the view instead of throwing the drone into
+            // a bank it keeps the momentum of. That distinction is most of what made keyboard flight erratic.
+            displacement = dronePhysics.simulateSimple(
+                dt,
+                throttle,
+                rInput,
+                pInput,
+                yInput,
+                mouseRollDelta,
+                mousePitchDelta,
+                (float) (double) FullfudServerConfig.SERVER.fpvSimpleMaxSpeed.get(),
+                (float) (double) FullfudServerConfig.SERVER.fpvSimpleAcceleration.get(),
+                (float) (double) FullfudServerConfig.SERVER.fpvSimpleClimbRate.get(),
+                (float) (double) FullfudServerConfig.SERVER.fpvSimpleYawDegreesPerSecond.get(),
+                (float) (double) FullfudServerConfig.SERVER.fpvSimpleNeutralThrottle.get(),
+                (float) (double) FullfudServerConfig.SERVER.fpvSimpleTiltDegrees.get(),
+                (float) (double) FullfudServerConfig.SERVER.fpvSimpleAimPitchLimit.get()
+            );
+        } else {
+            displacement = dronePhysics.simulate(
+                dt,
+                throttle,
+                rInput,
+                pInput,
+                yInput,
+                mousePitchDelta,
+                mouseRollDelta,
+                dronePhysics.isFlightMode3d()
+            );
+        }
         inputMousePitchDelta = 0.0F;
         inputMouseRollDelta = 0.0F;
+
+        if (!freeFall && !simpleFlight) {
+            applyLevelAssist(dt, pInput, rInput, mousePitchDelta, mouseRollDelta);
+        }
 
         // Read back state from physics engine
         Quaternionf physQ = dronePhysics.getOrientation();
@@ -846,6 +1084,27 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             ChunkLoadManager.ensureChunksLoaded(serverLevel, getId(), chunkPosition(), radius);
         }
     }
+
+    /**
+     * Files this drone's position so a controller can recall it once the chunk it is in has unloaded.
+     * See {@link FpvDroneLocations}.
+     */
+    private void rememberLocation() {
+        if (level() instanceof ServerLevel serverLevel) {
+            FpvDroneLocations.get(serverLevel.getServer())
+                .remember(getUUID(), serverLevel.dimension(), blockPosition());
+        }
+    }
+
+    /** Straight-line distance to the pilot, not distance flown — the point is how far out of sight it is. */
+    private void checkLongFlightAdvancement() {
+        final ServerPlayer controller = getController();
+        if (controller != null
+            && controller.distanceToSqr(this)
+                >= FullfudAdvancements.LONG_FLIGHT_BLOCKS * FullfudAdvancements.LONG_FLIGHT_BLOCKS) {
+            FullfudAdvancements.grant(controller, FullfudAdvancements.LONG_FLIGHT);
+        }
+    }
     
     private void releaseChunkTicket() {
         if (level() instanceof ServerLevel serverLevel) {
@@ -877,14 +1136,19 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         if (!canAccess(player)) {
             return InteractionResult.FAIL;
         }
+        if (held.getItem() instanceof ScrewdriverItem) {
+            if (player instanceof ServerPlayer serverPlayer) {
+                DroneServiceMenu.open(serverPlayer, this, getServiceBay(), true);
+            }
+            return InteractionResult.CONSUME;
+        }
         if (held.getItem() instanceof FpvConfiguratorItem) {
             if (player instanceof ServerPlayer serverPlayer) {
-                FullfudNetwork.getChannel().send(
-                    PacketDistributor.PLAYER.with(() -> serverPlayer),
+                FullfudNetwork.sendToPlayer(serverPlayer,
                     new OpenFpvConfiguratorPacket(getUUID(), droneConfig.save())
                 );
             }
-            return InteractionResult.sidedSuccess(level().isClientSide());
+            return level().isClientSide() ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         if (held.getItem() instanceof FpvControllerItem controller) {
             controller.link(held, this, player);
@@ -911,9 +1175,11 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         return false;
     }
 
+    // Entity.hurt is final void since 1.21.2 and forwards here only on a ServerLevel, so the former
+    // isClientSide() half of the guard is implicit.
     @Override
-    public boolean hurt(final DamageSource source, final float amount) {
-        if (level().isClientSide() || isRemoved()) {
+    public boolean hurtServer(final ServerLevel level, final DamageSource source, final float amount) {
+        if (isRemoved()) {
             return false;
         }
         if (detonating) {
@@ -940,6 +1206,15 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
                 endRemoteControl(null);
             }
             releaseChunkTicket();
+            // An unloading drone is still out there and still recallable, so its record is refreshed rather
+            // than dropped; only a destroyed one stops existing.
+            if (reason.shouldDestroy()) {
+                if (level() instanceof ServerLevel serverLevel) {
+                    FpvDroneLocations.get(serverLevel.getServer()).forget(getUUID());
+                }
+            } else {
+                rememberLocation();
+            }
         }
         super.remove(reason);
     }
@@ -950,15 +1225,29 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
 
     private void destroyOnImpact(final Vec3 impactOrigin) {
         setPos(impactOrigin.x, impactOrigin.y, impactOrigin.z);
-        if (isExplosivePreset()) {
+        if (getWarhead().isPresent()) {
             explode();
         } else {
             crashAndDrop();
         }
     }
 
-    private boolean isExplosivePreset() {
-        return getDronePreset() == DronePreset.STRIKE_7INCH;
+    /**
+     * The <em>M</em> key. Only the pilot may do it, and only with a charge installed — an unloaded FPV
+     * has nothing to set off, so it says so rather than silently doing nothing.
+     */
+    public void detonateManually(final ServerPlayer sender) {
+        if (level().isClientSide() || detonating || isRemoved()) {
+            return;
+        }
+        if (!isController(sender)) {
+            return;
+        }
+        if (!getWarhead().isPresent()) {
+            sender.displayClientMessage(Component.translatable("message.fullfud.fpv.no_warhead"), true);
+            return;
+        }
+        explode();
     }
 
     private void prepareForDestruction() {
@@ -989,15 +1278,25 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         }
         final ServerPlayer controller = getController();
         final DronePreset preset = getDronePreset();
+        final WarheadCharge charge = getWarhead();
         final Vec3 explosionDirection = resolveExplosionDirection();
+        if (charge.isPresent()) {
+            FullfudAdvancements.grant(controller, FullfudAdvancements.KAMIKAZE);
+        }
         prepareForDestruction();
-        spawnTntEffect(controller, preset, explosionDirection);
+        spawnTntEffect(controller, preset, charge, explosionDirection);
         discard();
     }
 
+    /**
+     * The charge decides whether the terrain is touched at all. Without one this method is never reached
+     * — an unloaded FPV crashes and drops — so the only reason {@code charge} is read defensively here is
+     * that {@code power()} would be 0 and vanilla would still play a puff of nothing.
+     */
     private void spawnTntEffect(
-        @javax.annotation.Nullable final ServerPlayer controller,
+        @org.jetbrains.annotations.Nullable final ServerPlayer controller,
         final DronePreset preset,
+        final WarheadCharge charge,
         final Vec3 explosionDirection
     ) {
         if (!(level() instanceof ServerLevel serverLevel)) {
@@ -1006,11 +1305,29 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         final PrimedTnt tnt = new PrimedTnt(serverLevel, getX(), getY(), getZ(), controller);
         tnt.setFuse(0);
         RemotePlayerProtection.markHazard(tnt, this);
-        DroneExplosionLimiter.markNoBlockDamage(tnt);
+        if (!charge.isPresent()) {
+            DroneExplosionLimiter.markNoBlockDamage(tnt);
+        }
+        // The mod's own model does the killing in every case, so vanilla's entity damage stays off:
+        // leaving both on would double-count everything inside the radius.
         DroneExplosionLimiter.markNoEntityDamage(tnt);
         serverLevel.addFreshEntity(tnt);
-        serverLevel.explode(tnt, getX(), getY(), getZ(), FPV_FIREBALL_POWER, net.minecraft.world.level.Level.ExplosionInteraction.MOB);
-        DroneExplosionEffects.afterFpvExplosion(serverLevel, tnt, controller, preset, explosionDirection);
+        serverLevel.explode(
+            tnt,
+            getX(),
+            getY(),
+            getZ(),
+            charge.isPresent() ? charge.power() : FPV_FIREBALL_POWER,
+            charge.incendiary(),
+            charge.isPresent()
+                ? net.minecraft.world.level.Level.ExplosionInteraction.TNT
+                : net.minecraft.world.level.Level.ExplosionInteraction.MOB
+        );
+        DroneExplosionEffects.afterFpvExplosion(
+            serverLevel, tnt, controller, preset, explosionDirection, charge.blastScale());
+        if (charge.isPresent()) {
+            BlastLightRefresh.schedule(serverLevel, position(), charge.power());
+        }
         tnt.discard();
     }
 
@@ -1049,7 +1366,14 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     }
 
     private void dropAsItem() {
-        spawnAtLocation(new ItemStack(resolveDropItem()));
+        final ItemStack stack = new ItemStack(resolveDropItem());
+        // The loadout travels with the airframe, so a drone put back in a chest keeps its pack and its
+        // cargo. Battery ticks are not a stack, hence the separate component.
+        getServiceBay().writeToStack(stack);
+        if (getBatteryTicks() > 0) {
+            stack.set(FullfudDataComponents.DRONE_BATTERY_TICKS, getBatteryTicks());
+        }
+        EntityDrops.spawnAtLocation(this, stack);
     }
 
     private int resolveSignalMultiplier() {
@@ -1065,6 +1389,15 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
 
     private Item resolveDropItem() {
         final int signalMultiplier = resolveSignalMultiplier();
+        // Cargo comes first: a hauler flies on STANDARD_STRIKE physics, so the preset alone cannot tell
+        // the two apart and switching on it would hand back a plain drone and eat the pod.
+        if (this.cargo) {
+            return switch (signalMultiplier) {
+                case 4 -> FullfudRegistries.FPV_DRONE_CARGO_ITEM_X4.get();
+                case 2 -> FullfudRegistries.FPV_DRONE_CARGO_ITEM_X2.get();
+                default -> FullfudRegistries.FPV_DRONE_CARGO_ITEM.get();
+            };
+        }
         return switch (getDronePreset()) {
             case TINY_WHOOP -> switch (signalMultiplier) {
                 case 4 -> FullfudRegistries.FPV_DRONE_WHOOP_ITEM_X4.get();
@@ -1086,15 +1419,17 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
 
     public void applyControl(final FpvControlPacket packet, final ServerPlayer sender) {
         if (!isController(sender)) {
+            lastControlOutcome = "reject:notController";
             return;
         }
 
         if (!isRemoteStateValidFor(sender)) {
+            lastControlOutcome = "reject:remoteStateInvalid";
             return;
         }
 
         controlTimeoutTicks = CONTROL_TIMEOUT_TICKS;
-        
+
         if (getSignalQuality() < 0.05F) {
             inputPitch = 0.0F;
             inputRoll = 0.0F;
@@ -1102,10 +1437,12 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             inputMousePitchDelta = 0.0F;
             inputMouseRollDelta = 0.0F;
             targetThrottle = Math.max(0.0F, targetThrottle - 0.08F);
+            lastControlOutcome = "reject:signalQuality";
             return;
         }
 
         if (!hasLinkedGoggles(sender) && !ensureLinkedGoggles(sender)) {
+            lastControlOutcome = "reject:noGoggles";
             return;
         }
 
@@ -1124,6 +1461,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             || !Float.isFinite(packet.mousePitchDelta())
             || !Float.isFinite(packet.mouseRollDelta())
             || !Float.isFinite(packet.throttle())) {
+            lastControlOutcome = "reject:nonFinite";
             return;
         }
 
@@ -1146,13 +1484,18 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         targetThrottle = Mth.clamp(packet.throttle(), 0.0F, 1.0F);
         
         if (packet.armAction() == 1) {
-            if (getBatteryTicks() > 0) setArmed(true);
+            if (getBatteryTicks() > 0) {
+                setArmed(true);
+                FullfudAdvancements.grant(sender, FullfudAdvancements.ARM);
+            }
         } else if (packet.armAction() == 2) {
             setArmed(false);
             inputMousePitchDelta = 0.0F;
             inputMouseRollDelta = 0.0F;
             targetThrottle = 0.0F;
         }
+        lastControlOutcome = "accepted";
+        lastControlPacket = packet;
     }
 
     public void queueControl(final FpvControlPacket packet, final ServerPlayer sender) {
@@ -1170,7 +1513,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         if (sender == null) {
             return false;
         }
-        final CompoundTag root = sender.getPersistentData();
+        final CompoundTag root = PersistentData.of(sender);
         if (!root.contains(PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
             return tryRestoreRemoteTag(sender);
         }
@@ -1212,15 +1555,15 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         if (owner == null) {
             owner = player.getUUID();
         }
-        final CompoundTag root = player.getPersistentData();
+        final CompoundTag root = PersistentData.of(player);
         if (root.contains(PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
             final CompoundTag tag = root.getCompound(PLAYER_REMOTE_TAG);
             if (!tag.hasUUID(PLAYER_TAG_DRONE) || !getUUID().equals(tag.getUUID(PLAYER_TAG_DRONE))) {
                 forceReleaseFromPersistentData(player.getServer(), player.getUUID(), tag);
             }
         }
-        if (!isWithinPlayerChunkRange(player)) {
-            player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.fullfud.fpv.out_of_range"), true);
+        if (player.level() != level()) {
+            player.displayClientMessage(net.minecraft.network.chat.Component.translatable("message.fullfud.fpv.other_dimension"), true);
             return false;
         }
         if (!hasLinkedGoggles(player) && !ensureLinkedGoggles(player)) {
@@ -1239,21 +1582,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         lastSentViewCenter = null;
         syncViewCenter(player);
         return true;
-    }
-
-    private boolean isWithinPlayerChunkRange(final ServerPlayer player) {
-        if (player == null || !(level() instanceof ServerLevel serverLevel)) {
-            return false;
-        }
-        if (player.level() != level()) {
-            return false;
-        }
-        final int viewDistance = Math.max(2, serverLevel.getServer().getPlayerList().getViewDistance());
-        final ChunkPos playerChunk = player.chunkPosition();
-        final ChunkPos droneChunk = this.chunkPosition();
-        final int dx = Math.abs(playerChunk.x - droneChunk.x);
-        final int dz = Math.abs(playerChunk.z - droneChunk.z);
-        return Math.max(dx, dz) <= viewDistance;
     }
 
     public void endRemoteControl(final ServerPlayer player) {
@@ -1275,6 +1603,8 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         inputYaw = 0;
         inputMousePitchDelta = 0;
         inputMouseRollDelta = 0;
+        // The aimed nose angle is the pilot's, not the airframe's: the next pilot to take this drone starts level.
+        dronePhysics.resetSimpleAttitude();
         targetThrottle = 0;
         throttleOutput = 0;
         queuedControl = null;
@@ -1386,9 +1716,12 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         final ServerLevel targetLevel = server != null ? server.getLevel(controlSession.dimension()) : player.serverLevel();
         if (targetLevel != null) {
             final ChunkPos chunkPos = new ChunkPos(BlockPos.containing(controlSession.origin()));
-            targetLevel.getChunkSource().addRegionTicket(net.minecraft.server.level.TicketType.POST_TELEPORT, chunkPos, 1, player.getId());
+            ChunkLoadManager.warmTeleportDestination(targetLevel, chunkPos, player.getId());
             final Vec3 origin = controlSession.origin();
-            player.teleportTo(targetLevel, origin.x, origin.y, origin.z, controlSession.yaw(), controlSession.pitch());
+            // 1.21.2 folded the relative-movement flags and the reset-camera behaviour into teleportTo's
+            // signature. An empty Set is an absolute teleport, and the trailing true is the setCamera(this)
+            // that the old 6-arg overload did unconditionally.
+            player.teleportTo(targetLevel, origin.x, origin.y, origin.z, Set.of(), controlSession.yaw(), controlSession.pitch(), true);
             player.fallDistance = 0.0F;
         }
         resetViewCenter(player);
@@ -1412,8 +1745,8 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
                 final float yaw = tag.getFloat(PLAYER_TAG_ORIGIN_YAW);
                 final float pitch = tag.getFloat(PLAYER_TAG_ORIGIN_PITCH);
                 final ChunkPos chunkPos = new ChunkPos(BlockPos.containing(x, y, z));
-                targetLevel.getChunkSource().addRegionTicket(net.minecraft.server.level.TicketType.POST_TELEPORT, chunkPos, 1, player.getId());
-                player.teleportTo(targetLevel, x, y, z, yaw, pitch);
+                ChunkLoadManager.warmTeleportDestination(targetLevel, chunkPos, player.getId());
+                player.teleportTo(targetLevel, x, y, z, Set.of(), yaw, pitch, true);
                 player.fallDistance = 0.0F;
             }
         }
@@ -1443,14 +1776,14 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         if (session.gameType != null) {
             tag.putInt(PLAYER_TAG_ORIGIN_GM, session.gameType.getId());
         }
-        player.getPersistentData().put(PLAYER_REMOTE_TAG, tag);
+        PersistentData.of(player).put(PLAYER_REMOTE_TAG, tag);
     }
 
     private static void clearRemoteTag(final ServerPlayer player) {
         if (player == null) {
             return;
         }
-        final CompoundTag root = player.getPersistentData();
+        final CompoundTag root = PersistentData.of(player);
         root.remove(PLAYER_REMOTE_TAG);
     }
 
@@ -1678,11 +2011,6 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     }
 
     @Override
-    public Packet<ClientGamePacketListener> getAddEntityPacket() {
-        return NetworkHooks.getEntitySpawningPacket(this);
-    }
-
-    @Override
     public void registerControllers(final AnimatableManager.ControllerRegistrar controllers) {
         controllers.add(new AnimationController<>(this, "controller", 0, this::predicate));
     }
@@ -1706,7 +2034,7 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
 
     public record CameraOrientation(float yaw, float pitch, float roll, Vec3 forward, Vec3 up, Vec3 right) { }
 
-    @OnlyIn(Dist.CLIENT)
+    @Environment(EnvType.CLIENT)
     private static final class ClientSide {
         private static void tick(final FpvDroneEntity drone) {
             drone.throttleOutput = drone.entityData.get(DATA_THRUST);

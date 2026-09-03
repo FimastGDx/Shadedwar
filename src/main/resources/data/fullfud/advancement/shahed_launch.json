@@ -1,0 +1,28 @@
+{
+  "parent": "fullfud:shahed_launcher",
+  "criteria": {
+    "granted": {
+      "trigger": "minecraft:impossible"
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:shahed_fuel"
+    },
+    "title": {
+      "translate": "advancements.fullfud.shahed_launch.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.shahed_launch.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true,
+    "frame": "goal"
+  },
+  "requirements": [
+    [
+      "granted"
+    ]
+  ]
+}

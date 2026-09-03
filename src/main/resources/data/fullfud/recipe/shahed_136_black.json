@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "fullfud:shahed_136",
+    "minecraft:black_dye"
+  ],
+  "result": {
+    "id": "fullfud:shahed_136_black",
+    "count": 1
+  }
+}

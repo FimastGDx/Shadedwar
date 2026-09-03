@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:electronics",
+  "criteria": {
+    "reb_emitter": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:reb_emitter"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:reb_emitter"
+    },
+    "title": {
+      "translate": "advancements.fullfud.reb.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.reb.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "reb_emitter"
+    ]
+  ]
+}

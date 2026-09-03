@@ -3,7 +3,9 @@ package com.fullfud.fullfud.common.menu;
 import com.fullfud.fullfud.common.entity.Fp5FlamingoEntity;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import net.minecraft.core.BlockPos;
-import net.minecraft.network.FriendlyByteBuf;
+import net.minecraft.core.UUIDUtil;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -15,19 +17,30 @@ import java.util.Optional;
 import java.util.UUID;
 
 public class Fp5MonitorMenu extends AbstractContainerMenu {
+    /** Screen-opening payload; replaces the hand-rolled {@code FriendlyByteBuf} reads of the Forge version. */
+    public record Data(UUID flamingoId, int flamingoEntityId, BlockPos targetPos, boolean launched) {
+        public static final StreamCodec<io.netty.buffer.ByteBuf, Data> STREAM_CODEC = StreamCodec.composite(
+            UUIDUtil.STREAM_CODEC, Data::flamingoId,
+            ByteBufCodecs.VAR_INT, Data::flamingoEntityId,
+            BlockPos.STREAM_CODEC, Data::targetPos,
+            ByteBufCodecs.BOOL, Data::launched,
+            Data::new
+        );
+    }
+
     private final UUID flamingoId;
     private final int flamingoEntityId;
     private final BlockPos targetPos;
     private final boolean launched;
 
-    public Fp5MonitorMenu(final int containerId, final Inventory inventory, final FriendlyByteBuf buffer) {
+    public Fp5MonitorMenu(final int containerId, final Inventory inventory, final Data data) {
         this(
             containerId,
             inventory,
-            readFlamingoUuid(buffer),
-            readEntityId(buffer),
-            readTargetPos(buffer),
-            readLaunched(buffer)
+            data == null ? null : data.flamingoId(),
+            data == null ? -1 : data.flamingoEntityId(),
+            data == null ? BlockPos.ZERO : data.targetPos(),
+            data != null && data.launched()
         );
     }
 
@@ -97,33 +110,5 @@ public class Fp5MonitorMenu extends AbstractContainerMenu {
             }
         }
         return Optional.empty();
-    }
-
-    private static UUID readFlamingoUuid(final FriendlyByteBuf buffer) {
-        if (buffer == null || buffer.readableBytes() < 16) {
-            return null;
-        }
-        return buffer.readUUID();
-    }
-
-    private static int readEntityId(final FriendlyByteBuf buffer) {
-        if (buffer == null || buffer.readableBytes() < 4) {
-            return -1;
-        }
-        return buffer.readInt();
-    }
-
-    private static BlockPos readTargetPos(final FriendlyByteBuf buffer) {
-        if (buffer == null || buffer.readableBytes() < 8) {
-            return BlockPos.ZERO;
-        }
-        return buffer.readBlockPos();
-    }
-
-    private static boolean readLaunched(final FriendlyByteBuf buffer) {
-        if (buffer == null || !buffer.isReadable()) {
-            return false;
-        }
-        return buffer.readBoolean();
     }
 }
