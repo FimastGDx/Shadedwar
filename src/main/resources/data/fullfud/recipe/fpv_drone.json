@@ -1,0 +1,20 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "ICI",
+    "WPW",
+    "IRI"
+  ],
+  "key": {
+    "I": "fullfud:ingot_steel",
+    "C": "fullfud:controller",
+    "W": "fullfud:wire_copper_new",
+    "P": "fullfud:insert_steel",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "fullfud:fpv_drone",
+    "count": 1
+  },
+  "group": "fullfud_fpv_drone"
+}

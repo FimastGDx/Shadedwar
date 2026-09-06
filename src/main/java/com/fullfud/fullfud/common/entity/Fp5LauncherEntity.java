@@ -1,18 +1,19 @@
 package com.fullfud.fullfud.common.entity;
 
 import com.fullfud.fullfud.common.item.Fp5FlamingoItem;
+import com.fullfud.fullfud.core.EntityDrops;
+import net.minecraft.network.syncher.SynchedEntityData;
 import com.fullfud.fullfud.common.item.MonitorItem;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -20,10 +21,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.AABB;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.network.NetworkHooks;
 import software.bernie.geckolib.animatable.GeoEntity;
-import software.bernie.geckolib.core.animatable.instance.AnimatableInstanceCache;
-import software.bernie.geckolib.core.animation.AnimatableManager;
+import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
+import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 import java.util.UUID;
@@ -48,7 +48,7 @@ public class Fp5LauncherEntity extends Entity implements GeoEntity {
     }
 
     @Override
-    protected void defineSynchedData() {
+    protected void defineSynchedData(final SynchedEntityData.Builder builder) {
     }
 
     @Override
@@ -84,7 +84,7 @@ public class Fp5LauncherEntity extends Entity implements GeoEntity {
             if (hasFlamingo()) {
                 return InteractionResult.FAIL;
             }
-            final Fp5FlamingoEntity flamingo = FullfudRegistries.FP5_FLAMINGO_ENTITY.get().create(serverLevel);
+            final Fp5FlamingoEntity flamingo = FullfudRegistries.FP5_FLAMINGO_ENTITY.get().create(serverLevel, EntitySpawnReason.SPAWN_ITEM_USE);
             if (flamingo == null) {
                 return InteractionResult.FAIL;
             }
@@ -94,7 +94,7 @@ public class Fp5LauncherEntity extends Entity implements GeoEntity {
             if (!player.getAbilities().instabuild) {
                 held.shrink(1);
             }
-            return InteractionResult.sidedSuccess(level().isClientSide);
+            return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         if (held.getItem() instanceof MonitorItem) {
             final Fp5FlamingoEntity flamingo = getStoredFlamingo();
@@ -102,11 +102,11 @@ public class Fp5LauncherEntity extends Entity implements GeoEntity {
                 return InteractionResult.FAIL;
             }
             MonitorItem.linkAndOpenFp5Monitor(serverPlayer, held, flamingo);
-            return InteractionResult.sidedSuccess(level().isClientSide);
+            return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         if (player.isShiftKeyDown() && held.isEmpty() && hasFlamingo()) {
             ejectStoredFlamingo(player);
-            return InteractionResult.sidedSuccess(level().isClientSide);
+            return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         return InteractionResult.PASS;
     }
@@ -126,9 +126,11 @@ public class Fp5LauncherEntity extends Entity implements GeoEntity {
         return true;
     }
 
+    // Entity.hurt is final void since 1.21.2 and forwards here only on a ServerLevel, so the former
+    // isClientSide half of the guard is implicit.
     @Override
-    public boolean hurt(final DamageSource source, final float amount) {
-        if (level().isClientSide || !isAlive()) {
+    public boolean hurtServer(final ServerLevel level, final DamageSource source, final float amount) {
+        if (!isAlive()) {
             return false;
         }
         dropStoredFlamingoAsItem();
@@ -151,16 +153,6 @@ public class Fp5LauncherEntity extends Entity implements GeoEntity {
 
     @Override
     protected void checkFallDamage(final double y, final boolean onGround, final BlockState state, final BlockPos pos) {
-    }
-
-    @Override
-    public AABB getBoundingBoxForCulling() {
-        return super.getBoundingBoxForCulling().inflate(1.0D * SCALE, 0.5D * SCALE, 1.0D * SCALE);
-    }
-
-    @Override
-    public Packet<ClientGamePacketListener> getAddEntityPacket() {
-        return NetworkHooks.getEntitySpawningPacket(this);
     }
 
     @Override
@@ -252,7 +244,7 @@ public class Fp5LauncherEntity extends Entity implements GeoEntity {
         }
         final ItemStack stack = flamingo.createItemStack();
         if (!player.addItem(stack)) {
-            spawnAtLocation(stack);
+            EntityDrops.spawnAtLocation(this, stack);
         }
         flamingo.suppressItemDrop();
         flamingo.discard();
@@ -264,14 +256,14 @@ public class Fp5LauncherEntity extends Entity implements GeoEntity {
         if (flamingo == null) {
             return;
         }
-        spawnAtLocation(flamingo.createItemStack());
+        EntityDrops.spawnAtLocation(this, flamingo.createItemStack());
         flamingo.suppressItemDrop();
         flamingo.discard();
         clearStoredFlamingo();
     }
 
     private void dropSelf() {
-        spawnAtLocation(new ItemStack(FullfudRegistries.FP5_LAUNCHER_ITEM.get()));
+        EntityDrops.spawnAtLocation(this, new ItemStack(FullfudRegistries.FP5_LAUNCHER_ITEM.get()));
     }
 
     private void updateBoundingBox() {

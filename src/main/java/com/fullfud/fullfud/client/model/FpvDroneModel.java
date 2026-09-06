@@ -3,22 +3,24 @@ package com.fullfud.fullfud.client.model;
 import com.fullfud.fullfud.FullfudMod;
 import com.fullfud.fullfud.common.entity.FpvDroneEntity;
 import net.minecraft.resources.ResourceLocation;
-import software.bernie.geckolib.core.animatable.model.CoreGeoBone;
-import software.bernie.geckolib.core.animation.AnimationState;
+import org.jetbrains.annotations.Nullable;
+import software.bernie.geckolib.cache.object.GeoBone;
+import software.bernie.geckolib.animation.AnimationState;
 import software.bernie.geckolib.model.GeoModel;
+import software.bernie.geckolib.renderer.GeoRenderer;
 
 public class FpvDroneModel extends GeoModel<FpvDroneEntity> {
-    private static final ResourceLocation MODEL = new ResourceLocation(FullfudMod.MOD_ID, "geo/fpv_drone.geo.json");
-    private static final ResourceLocation TEXTURE = new ResourceLocation(FullfudMod.MOD_ID, "textures/entity/fpv_drone.png");
-    private static final ResourceLocation ANIM = new ResourceLocation(FullfudMod.MOD_ID, "animations/fpv.animation.json");
+    private static final ResourceLocation MODEL = ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "geo/fpv_drone.geo.json");
+    private static final ResourceLocation TEXTURE = ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "textures/entity/fpv_drone.png");
+    private static final ResourceLocation ANIM = ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "animations/fpv.animation.json");
 
     @Override
-    public ResourceLocation getModelResource(final FpvDroneEntity entity) {
+    public ResourceLocation getModelResource(final FpvDroneEntity entity, @Nullable final GeoRenderer<FpvDroneEntity> renderer) {
         return MODEL;
     }
 
     @Override
-    public ResourceLocation getTextureResource(final FpvDroneEntity entity) {
+    public ResourceLocation getTextureResource(final FpvDroneEntity entity, @Nullable final GeoRenderer<FpvDroneEntity> renderer) {
         return TEXTURE;
     }
 
@@ -29,7 +31,7 @@ public class FpvDroneModel extends GeoModel<FpvDroneEntity> {
 
     @Override
     public void setCustomAnimations(FpvDroneEntity animatable, long instanceId, AnimationState<FpvDroneEntity> animationState) {
-        CoreGeoBone body = getAnimationProcessor().getBone("Body");
+        GeoBone body = getAnimationProcessor().getBone("Body");
 
         if (body != null) {
             body.setRotX((float) Math.toRadians(-animatable.getXRot()));

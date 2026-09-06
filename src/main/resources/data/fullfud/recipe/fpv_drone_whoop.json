@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    " C ",
+    "WPW",
+    " R "
+  ],
+  "key": {
+    "C": "fullfud:controller",
+    "W": "fullfud:wire_copper_new",
+    "P": "fullfud:insert_steel",
+    "R": "minecraft:redstone"
+  },
+  "result": {
+    "id": "fullfud:fpv_drone_whoop",
+    "count": 1
+  },
+  "group": "fullfud_fpv_drone"
+}

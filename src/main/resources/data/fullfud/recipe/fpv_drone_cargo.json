@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PCP",
+    "WDW",
+    "PPP"
+  ],
+  "key": {
+    "P": "fullfud:insert_steel",
+    "C": "minecraft:chest",
+    "W": "fullfud:wire_copper_new",
+    "D": "fullfud:fpv_drone"
+  },
+  "result": {
+    "id": "fullfud:fpv_drone_cargo",
+    "count": 1
+  },
+  "group": "fullfud_fpv_drone"
+}

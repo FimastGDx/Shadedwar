@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:electronics",
+  "criteria": {
+    "monitor_control": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:monitor_control"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:monitor_control"
+    },
+    "title": {
+      "translate": "advancements.fullfud.monitor.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.monitor.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "monitor_control"
+    ]
+  ]
+}

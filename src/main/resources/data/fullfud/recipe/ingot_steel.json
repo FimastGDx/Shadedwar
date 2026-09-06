@@ -1,0 +1,11 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "minecraft:iron_ingot",
+    "minecraft:coal"
+  ],
+  "result": {
+    "id": "fullfud:ingot_steel",
+    "count": 1
+  }
+}

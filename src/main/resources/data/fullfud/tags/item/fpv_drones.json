@@ -1,0 +1,17 @@
+{
+  "replace": false,
+  "values": [
+    "fullfud:fpv_drone",
+    "fullfud:fpv_drone_x2",
+    "fullfud:fpv_drone_x4",
+    "fullfud:fpv_drone_whoop",
+    "fullfud:fpv_drone_whoop_x2",
+    "fullfud:fpv_drone_whoop_x4",
+    "fullfud:fpv_drone_strike",
+    "fullfud:fpv_drone_strike_x2",
+    "fullfud:fpv_drone_strike_x4",
+    "fullfud:fpv_drone_cargo",
+    "fullfud:fpv_drone_cargo_x2",
+    "fullfud:fpv_drone_cargo_x4"
+  ]
+}

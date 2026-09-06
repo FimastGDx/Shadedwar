@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "WWW",
+    "ICI",
+    "PBP"
+  ],
+  "key": {
+    "W": "fullfud:wire_copper_new",
+    "I": "fullfud:ingot_steel",
+    "C": "fullfud:controller",
+    "P": "fullfud:insert_steel",
+    "B": "fullfud:steel_block"
+  },
+  "result": {
+    "id": "fullfud:reb_emitter",
+    "count": 1
+  }
+}

@@ -1,6 +1,9 @@
 package com.fullfud.fullfud.common.entity;
 
 import com.fullfud.fullfud.common.item.MonitorItem;
+import com.fullfud.fullfud.core.EntityDrops;
+import com.fullfud.fullfud.core.FullfudAdvancements;
+import net.minecraft.network.syncher.SynchedEntityData;
 import com.fullfud.fullfud.common.item.ShahedDroneItem;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import com.fullfud.fullfud.core.network.FullfudNetwork;
@@ -8,14 +11,13 @@ import com.fullfud.fullfud.core.network.packet.ShahedLinkPacket;
 import net.minecraft.core.BlockPos;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.network.chat.Component;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.InteractionHand;
 import net.minecraft.world.InteractionResult;
 import net.minecraft.world.damagesource.DamageSource;
 import net.minecraft.world.entity.Entity;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.EntityType;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.ItemStack;
@@ -23,11 +25,9 @@ import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.phys.Vec3;
 import java.util.UUID;
-import net.minecraftforge.network.NetworkHooks;
-import net.minecraftforge.network.PacketDistributor;
 import software.bernie.geckolib.animatable.GeoEntity;
-import software.bernie.geckolib.core.animatable.instance.AnimatableInstanceCache;
-import software.bernie.geckolib.core.animation.AnimatableManager;
+import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
+import software.bernie.geckolib.animation.AnimatableManager;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 
@@ -43,7 +43,7 @@ public class ShahedLauncherEntity extends Entity implements GeoEntity {
     }
 
     @Override
-    protected void defineSynchedData() { }
+    protected void defineSynchedData(final SynchedEntityData.Builder builder) { }
 
     @Override
     protected void readAdditionalSaveData(final CompoundTag tag) {
@@ -76,30 +76,31 @@ public class ShahedLauncherEntity extends Entity implements GeoEntity {
             if (hasDrone()) {
                 return InteractionResult.FAIL;
             }
-            final ShahedDroneEntity drone = FullfudRegistries.SHAHED_ENTITY.get().create(serverLevel);
+            final ShahedDroneEntity drone = FullfudRegistries.SHAHED_ENTITY.get().create(serverLevel, EntitySpawnReason.SPAWN_ITEM_USE);
             if (drone == null) {
                 return InteractionResult.PASS;
             }
             drone.setColor(droneItem.getColor());
             drone.setSpeedScale(droneItem.getSpeedScale());
+            drone.restoreLoadout(held);
             drone.mountLauncher(this);
             serverLevel.addFreshEntity(drone);
             setStoredDrone(drone);
             if (!player.getAbilities().instabuild) {
                 held.shrink(1);
             }
-            return InteractionResult.sidedSuccess(level().isClientSide);
+            return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         if (held.getItem() instanceof MonitorItem) {
             if (!hasDrone()) {
                 return InteractionResult.FAIL;
             }
             launchStoredDrone(player, held);
-            return InteractionResult.sidedSuccess(level().isClientSide);
+            return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         if (player.isShiftKeyDown() && held.isEmpty() && hasDrone()) {
             ejectStoredDrone(player);
-            return InteractionResult.sidedSuccess(level().isClientSide);
+            return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         return InteractionResult.PASS;
     }
@@ -114,9 +115,11 @@ public class ShahedLauncherEntity extends Entity implements GeoEntity {
         return false;
     }
 
+    // Entity.hurt is final void since 1.21.2 and forwards here only on a ServerLevel, so the former
+    // isClientSide half of the guard is implicit.
     @Override
-    public boolean hurt(final DamageSource source, final float amount) {
-        if (level().isClientSide || !isAlive()) {
+    public boolean hurtServer(final ServerLevel level, final DamageSource source, final float amount) {
+        if (!isAlive()) {
             return false;
         }
         dropStoredDroneAsItem();
@@ -195,7 +198,8 @@ public class ShahedLauncherEntity extends Entity implements GeoEntity {
         drone.launchFromLauncher(this);
         MonitorItem.setLinkedDrone(monitorStack, drone.getUUID());
         if (player instanceof ServerPlayer serverPlayer) {
-            FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> serverPlayer), new ShahedLinkPacket(drone.getUUID(), true));
+            FullfudNetwork.sendToPlayer(serverPlayer, new ShahedLinkPacket(drone.getUUID(), true));
+            FullfudAdvancements.grant(serverPlayer, FullfudAdvancements.SHAHED_LAUNCH);
         }
         player.displayClientMessage(Component.translatable("message.fullfud.monitor.linked"), true);
         clearStoredDrone();
@@ -208,7 +212,7 @@ public class ShahedLauncherEntity extends Entity implements GeoEntity {
         }
         final ItemStack stack = drone.createItemStack();
         if (!player.addItem(stack)) {
-            spawnAtLocation(stack);
+            EntityDrops.spawnAtLocation(this, stack);
         }
         drone.discard();
         clearStoredDrone();
@@ -220,22 +224,17 @@ public class ShahedLauncherEntity extends Entity implements GeoEntity {
             return;
         }
         final ItemStack stack = drone.createItemStack();
-        spawnAtLocation(stack);
+        EntityDrops.spawnAtLocation(this, stack);
         drone.discard();
         clearStoredDrone();
     }
 
     private void dropSelf() {
-        spawnAtLocation(new ItemStack(FullfudRegistries.SHAHED_LAUNCHER_ITEM.get()));
+        EntityDrops.spawnAtLocation(this, new ItemStack(FullfudRegistries.SHAHED_LAUNCHER_ITEM.get()));
     }
 
     @Override
     protected void checkFallDamage(final double y, final boolean onGround, final BlockState state, final BlockPos pos) {
-    }
-
-    @Override
-    public Packet<ClientGamePacketListener> getAddEntityPacket() {
-        return NetworkHooks.getEntitySpawningPacket(this);
     }
 
     @Override

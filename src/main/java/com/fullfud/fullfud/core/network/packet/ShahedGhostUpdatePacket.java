@@ -1,11 +1,11 @@
 package com.fullfud.fullfud.core.network.packet;
 
-import com.fullfud.fullfud.core.network.handler.ShahedNetworkHandlers;
+import com.fullfud.fullfud.core.network.FullfudNetwork;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 public record ShahedGhostUpdatePacket(UUID droneId,
                                       double x,
@@ -19,7 +19,13 @@ public record ShahedGhostUpdatePacket(UUID droneId,
                                       float roll,
                                       float thrust,
                                       int colorId,
-                                      boolean onLauncher) {
+                                      boolean onLauncher) implements CustomPacketPayload {
+
+    public static final CustomPacketPayload.Type<ShahedGhostUpdatePacket> TYPE =
+        new CustomPacketPayload.Type<>(FullfudNetwork.id("shahed_ghost_update"));
+
+    public static final StreamCodec<FriendlyByteBuf, ShahedGhostUpdatePacket> STREAM_CODEC =
+        CustomPacketPayload.codec(ShahedGhostUpdatePacket::write, ShahedGhostUpdatePacket::decode);
 
     public static ShahedGhostUpdatePacket decode(final FriendlyByteBuf buffer) {
         final UUID droneId = buffer.readUUID();
@@ -38,7 +44,7 @@ public record ShahedGhostUpdatePacket(UUID droneId,
         return new ShahedGhostUpdatePacket(droneId, x, y, z, velocityX, velocityY, velocityZ, yaw, pitch, roll, thrust, colorId, onLauncher);
     }
 
-    public void encode(final FriendlyByteBuf buffer) {
+    public void write(final FriendlyByteBuf buffer) {
         buffer.writeUUID(droneId);
         buffer.writeDouble(x);
         buffer.writeDouble(y);
@@ -54,13 +60,8 @@ public record ShahedGhostUpdatePacket(UUID droneId,
         buffer.writeBoolean(onLauncher);
     }
 
-    public void handle(final Supplier<NetworkEvent.Context> contextSupplier) {
-        final NetworkEvent.Context context = contextSupplier.get();
-        if (!context.getDirection().getReceptionSide().isClient()) {
-            context.setPacketHandled(true);
-            return;
-        }
-        context.enqueueWork(() -> ShahedNetworkHandlers.handleGhostUpdate(this));
-        context.setPacketHandled(true);
+    @Override
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+        return TYPE;
     }
 }

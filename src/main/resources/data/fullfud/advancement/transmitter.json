@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:goggles",
+  "criteria": {
+    "fpv_controller": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:fpv_controller"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:fpv_controller"
+    },
+    "title": {
+      "translate": "advancements.fullfud.transmitter.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.transmitter.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "fpv_controller"
+    ]
+  ]
+}

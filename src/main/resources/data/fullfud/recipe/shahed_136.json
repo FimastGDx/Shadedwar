@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PCP",
+    "PBP",
+    "WIW"
+  ],
+  "key": {
+    "P": "fullfud:insert_steel",
+    "C": "fullfud:controller",
+    "B": "fullfud:steel_block",
+    "W": "fullfud:wire_copper_new",
+    "I": "fullfud:ingot_steel"
+  },
+  "result": {
+    "id": "fullfud:shahed_136",
+    "count": 1
+  }
+}

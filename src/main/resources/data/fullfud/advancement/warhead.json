@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:steel_plate",
+  "criteria": {
+    "warheads": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "#fullfud:warheads"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:ball_4"
+    },
+    "title": {
+      "translate": "advancements.fullfud.warhead.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.warhead.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "warheads"
+    ]
+  ]
+}

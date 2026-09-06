@@ -6,6 +6,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.world.InteractionResult;
+import net.minecraft.world.entity.EntitySpawnReason;
 import net.minecraft.world.entity.player.Player;
 import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
@@ -23,7 +24,7 @@ public class ShahedLauncherItem extends Item {
         final Level level = context.getLevel();
         final Player player = context.getPlayer();
         if (!(level instanceof ServerLevel serverLevel) || player == null) {
-            return InteractionResult.sidedSuccess(level.isClientSide);
+            return level.isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
 
         final Direction face = context.getClickedFace();
@@ -38,7 +39,7 @@ public class ShahedLauncherItem extends Item {
             return InteractionResult.FAIL;
         }
 
-        final ShahedLauncherEntity launcher = FullfudRegistries.SHAHED_LAUNCHER_ENTITY.get().create(serverLevel);
+        final ShahedLauncherEntity launcher = FullfudRegistries.SHAHED_LAUNCHER_ENTITY.get().create(serverLevel, EntitySpawnReason.SPAWN_ITEM_USE);
         if (launcher == null) {
             return InteractionResult.FAIL;
         }
@@ -54,7 +55,7 @@ public class ShahedLauncherItem extends Item {
         if (!player.getAbilities().instabuild) {
             stack.shrink(1);
         }
-        return InteractionResult.sidedSuccess(level.isClientSide);
+        return level.isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
     }
 
 }

@@ -131,5 +131,21 @@
       { "name": "fullfud:shrapnel_7" },
       { "name": "fullfud:shrapnel_8" }
     ]
+  },
+  "alert.warn": {
+    "sounds": [
+      {
+        "name": "fullfud:warn",
+        "stream": false
+      }
+    ]
+  },
+  "alert.caution": {
+    "sounds": [
+      {
+        "name": "fullfud:caut",
+        "stream": false
+      }
+    ]
   }
 }

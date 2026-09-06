@@ -1,14 +1,24 @@
 package com.fullfud.fullfud.common.entity;
 
+import com.fullfud.fullfud.common.entity.drone.DroneServiceBay;
+import com.fullfud.fullfud.common.entity.drone.WarheadCharge;
 import com.fullfud.fullfud.common.item.MonitorItem;
+import com.fullfud.fullfud.common.item.ScrewdriverItem;
+import com.fullfud.fullfud.common.menu.DroneServiceMenu;
+import com.fullfud.fullfud.core.BlastLightRefresh;
+import com.fullfud.fullfud.core.EntityDrops;
+import com.fullfud.fullfud.core.FullfudAdvancements;
+import com.fullfud.fullfud.core.FullfudDataComponents;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import com.fullfud.fullfud.core.DroneExplosionEffects;
 import com.fullfud.fullfud.core.DroneExplosionLimiter;
 import com.fullfud.fullfud.core.RemoteControlFailsafe;
 import com.fullfud.fullfud.core.RemotePlayerProtection;
+import com.fullfud.fullfud.core.data.PersistentData;
 import com.fullfud.fullfud.core.data.ShahedLinkData;
 import com.fullfud.fullfud.core.network.FullfudNetwork;
 import com.fullfud.fullfud.core.ChunkLoadManager;
+import com.fullfud.fullfud.core.config.FullfudServerConfig;
 import com.fullfud.fullfud.core.network.packet.DroneAudioLoopPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioOneShotPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedControlPacket;
@@ -23,8 +33,6 @@ import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.DoubleTag;
 import net.minecraft.nbt.ListTag;
 import net.minecraft.nbt.Tag;
-import net.minecraft.network.protocol.Packet;
-import net.minecraft.network.protocol.game.ClientGamePacketListener;
 import net.minecraft.network.protocol.game.ClientboundSetChunkCacheCenterPacket;
 import net.minecraft.network.syncher.EntityDataAccessor;
 import net.minecraft.network.syncher.EntityDataSerializers;
@@ -62,16 +70,15 @@ import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.ClipContext;
 import net.minecraft.world.phys.BlockHitResult;
 import net.minecraft.world.phys.HitResult;
-import net.minecraftforge.network.NetworkHooks;
-import net.minecraftforge.network.PacketDistributor;
+import net.minecraft.world.phys.shapes.VoxelShape;
 import org.joml.Quaternionf;
 import org.joml.Vector3f;
 import software.bernie.geckolib.animatable.GeoEntity;
-import software.bernie.geckolib.core.animatable.instance.AnimatableInstanceCache;
-import software.bernie.geckolib.core.animation.AnimatableManager;
-import software.bernie.geckolib.core.animation.AnimationController;
-import software.bernie.geckolib.core.animation.RawAnimation;
-import software.bernie.geckolib.core.object.PlayState;
+import software.bernie.geckolib.animatable.instance.AnimatableInstanceCache;
+import software.bernie.geckolib.animation.AnimatableManager;
+import software.bernie.geckolib.animation.AnimationController;
+import software.bernie.geckolib.animation.RawAnimation;
+import software.bernie.geckolib.animation.PlayState;
 import software.bernie.geckolib.util.GeckoLibUtil;
 
 import java.util.HashMap;
@@ -118,6 +125,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private static final String TAG_DAMAGE_TARGET_SPEED = "DamageTargetSpeed";
     private static final String TAG_LINEAR_VELOCITY = "LinearVelocity";
     private static final String TAG_FUEL = "FuelMass";
+    private static final String TAG_SERVICE_BAY = "ServiceBay";
     private static final String TAG_SPEED_SCALE = "SpeedScale";
     
     private static final String TAG_SESS_X = "SessX";
@@ -138,7 +146,8 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private static final float FORCE_RELEASE_FAILSAFE_THRUST = 0.60F;
     private static final double TICK_SECONDS = 1.0D / 20.0D;
     private static final double BASE_MASS_KG = 210.0D;
-    private static final double FUEL_CAPACITY_KG = 45.0D;
+    /** Public because the monitor's LOW_FUEL alert needs the full tank to turn the telemetry figure into a percentage. */
+    public static final double FUEL_CAPACITY_KG = 45.0D;
     private static final double FUEL_CONSUMPTION_PER_SEC = 0.9286D;
     private static final double MAX_THRUST_FORCE = 1500.0D;
     private static final double THRUST_CURVE_EXPONENT = 2.0D;
@@ -166,7 +175,26 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private static final double DAMAGE_SMOKE_PARTICLES_PER_TICK = 7.0D / 20.0D;
     private static final double DAMAGE_SMOKE_SPREAD = 0.7D;
     private static final double SLOW_SPEED_SCALE = 0.5D;
+    /** Airspeed floor for the bank-to-turn rate, so a slow or stalled airframe cannot pivot on the spot. */
+    private static final double MIN_TURN_AIRSPEED = 20.0D;
+    /** How fast the monitor's mouse contribution to the commanded attitude falls back to centre, per second. */
+    private static final double MOUSE_ATTITUDE_CENTER_PER_SEC = 2.5D;
     private static final int SHAHED_CHUNK_RADIUS = 4;
+    /**
+     * How long an armed airframe may sit inside a block before it is written off as wedged and detonated.
+     * Half a second: long enough that a single frame of overlap coming out of a chunk load does not count.
+     */
+    private static final int WEDGED_DETONATE_TICKS = 10;
+    /**
+     * How far the hull is grown before asking whether it is against terrain. Contact counts, so this is
+     * generous rather than exact: an airframe stopped flush against a wall reads the same as one inside it.
+     */
+    private static final double WEDGE_CONTACT_MARGIN = 0.02D;
+    /**
+     * Squared per-tick travel below which the airframe counts as going nowhere: 0.1 blocks a tick, two
+     * blocks a second, against a cruise of roughly thirty-six.
+     */
+    private static final double WEDGE_STALL_EPS_SQR = 0.01D;
     private static final EntityDimensions SHAHEED_DIMENSIONS = EntityDimensions.scalable(3.0F, 1.0F);
     private final Map<UUID, Integer> viewerDistances = new HashMap<>();
     private float controlForward;
@@ -174,6 +202,8 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private float controlVertical;
     private float inputMousePitchDelta;
     private float inputMouseRollDelta;
+    private double mousePitchOffsetDeg;
+    private double mouseRollOffsetDeg;
     private Vec3 linearVelocity = Vec3.ZERO;
     private Vec3 lastFlightStart = Vec3.ZERO;
     private double crippledHorizontalTargetSpeed = -1.0D;
@@ -181,6 +211,9 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private int projectileHitCount;
     private int controlTimeout;
     private int menuGraceTicks;
+    private int wedgedTicks;
+    /** Set on any tick the flight was held for terrain that had not loaded — see {@link #isWedgedInTerrain}. */
+    private boolean terrainStalled;
     private double rollRate;
     private double pitchRate;
     private UUID ownerUUID;
@@ -210,7 +243,15 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private static final double SHAHED_AUDIO_RANGE_BLOCKS = 800.0D;
     // Explosion tuning: approximate TNT-equivalent power for visual/terrain effects (Explosion Overhaul uses power).
     private static final float SHAHED_FIREBALL_POWER = 15.0F;
-    private double fuelMass = FUEL_CAPACITY_KG;
+    /** One canister is a third of the tank, so a full sortie takes three. */
+    private static final double FUEL_PER_CANISTER_KG = FUEL_CAPACITY_KG / 3.0D;
+    /** How far a player may drift from an open service bay before it closes. 8 blocks. */
+    private static final double SERVICE_REACH_SQR = 64.0D;
+    // A fresh airframe arrives dry. Fuel has to be crafted and loaded through the service bay, and
+    // computeEffectiveThrust already returns nothing at zero mass, so an unfuelled Shahed simply will
+    // not fly rather than needing a separate check.
+    private double fuelMass = 0.0D;
+    private DroneServiceBay serviceBay;
     private FlightTelemetry telemetry = FlightTelemetry.ZERO;
     private double bodyYaw;
     private double bodyPitch;
@@ -267,13 +308,13 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     }
 
     @Override
-    protected void defineSynchedData() {
-        this.entityData.define(DATA_THRUST, 0.25F);
-        this.entityData.define(DATA_COLOR, ShahedColor.WHITE.getId());
-        this.entityData.define(DATA_ON_LAUNCHER, false);
-        this.entityData.define(DATA_ROLL, 0.0F);
-        this.entityData.define(DATA_SERVER_YAW, getYRot());
-        this.entityData.define(DATA_SERVER_PITCH, getXRot());
+    protected void defineSynchedData(final SynchedEntityData.Builder builder) {
+        builder.define(DATA_THRUST, 0.25F);
+        builder.define(DATA_COLOR, ShahedColor.WHITE.getId());
+        builder.define(DATA_ON_LAUNCHER, false);
+        builder.define(DATA_ROLL, 0.0F);
+        builder.define(DATA_SERVER_YAW, getYRot());
+        builder.define(DATA_SERVER_PITCH, getXRot());
     }
 
     @Override
@@ -282,6 +323,10 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
 
         if (!level().isClientSide()) {
             updateJammerState();
+            // Only before arming: topping the tank up mid-flight would be free range.
+            if (!armed) {
+                installFuelFromBay();
+            }
         }
 
         if (isOnLauncher()) {
@@ -333,7 +378,12 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
             updateLaunchState();
             final ServerPlayer cp = getControllingPlayer();
             if (armed) {
-                if (detectImpact()) {
+                final Vec3 blockImpact = resolveBlockImpactOrigin();
+                if (blockImpact != null) {
+                    detonate(blockImpact);
+                    return;
+                }
+                if (isWedgedInTerrain()) {
                     detonate(position());
                     return;
                 }
@@ -398,7 +448,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
                     continue;
                 }
                 final float pitch = 0.9F + 0.2F * strength;
-                FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> player),
+                FullfudNetwork.sendToPlayer(player,
                     new DroneAudioOneShotPacket(AUDIO_TYPE_SHAHED, kind, getUUID(), getX(), getY(), getZ(), volume, pitch));
             }
         }
@@ -422,7 +472,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
                 if (!controlling && isOccluded(serverLevel, player)) {
                     volume *= 0.45F;
                 }
-                FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> player),
+                FullfudNetwork.sendToPlayer(player,
                     new DroneAudioLoopPacket(AUDIO_TYPE_SHAHED, getUUID(), getX(), getY(), getZ(), volume, pitch, true));
             }
         } else if (lastEngineActiveAudio) {
@@ -432,7 +482,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
                 if (!controlling && distSqr > rangeSqr) {
                     continue;
                 }
-                FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> player),
+                FullfudNetwork.sendToPlayer(player,
                     new DroneAudioLoopPacket(AUDIO_TYPE_SHAHED, getUUID(), getX(), getY(), getZ(), 0.0F, 1.0F, false));
             }
         }
@@ -457,8 +507,9 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         return result.getType() != HitResult.Type.MISS;
     }
 
+    // 1.21.2 dropped lerpTo's trailing teleport flag; the interpolation is otherwise unchanged.
     @Override
-    public void lerpTo(double x, double y, double z, float yaw, float pitch, int posRotationIncrements, boolean teleport) {
+    public void lerpTo(double x, double y, double z, float yaw, float pitch, int posRotationIncrements) {
         this.xO = x;
         this.yO = y;
         this.zO = z;
@@ -544,6 +595,8 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
             controlVertical = 0.0F;
             inputMousePitchDelta = 0.0F;
             inputMouseRollDelta = 0.0F;
+            mousePitchOffsetDeg = 0.0D;
+            mouseRollOffsetDeg = 0.0D;
         }
 
         if (menuGraceTicks > 0) {
@@ -618,9 +671,11 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         applyProjectileDamageEffects(dt);
 
         final Vec3 velPerTick = linearVelocity.scale(TICK_SECONDS);
-        this.setDeltaMovement(velPerTick);
+        terrainStalled = !isFlightPathTerrainReady(velPerTick);
+        final Vec3 movePerTick = terrainStalled ? Vec3.ZERO : velPerTick;
+        this.setDeltaMovement(movePerTick);
         this.hasImpulse = true;
-        this.move(MoverType.SELF, velPerTick);
+        this.move(MoverType.SELF, movePerTick);
         updateBoundingBox();
         resolveCollisionVelocity();
 
@@ -641,6 +696,134 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     }
 
     private void integrateAttitude(final double dt) {
+        if (FullfudServerConfig.SERVER.shahedBankControl.get()) {
+            integrateAttitudeBanked(dt);
+            return;
+        }
+        integrateAttitudeRates(dt);
+    }
+
+    /**
+     * Bank-to-turn attitude model: A/D picks a bank angle, W/S picks a pitch attitude, and the bank is what
+     * changes heading.
+     *
+     * <p>The rate model below is aerobatically honest but does not fly: banking tilts the lift vector sideways,
+     * {@link #applySideslipDamping} then removes exactly that sideways velocity, and nothing ever yaws the
+     * airframe — so a banked Shahed tracks almost straight ahead. A real aircraft turns because the sideways
+     * lift accelerates it into the turn <em>and</em> the fin drags the nose around after it; the standard
+     * coordinated-turn rate for that is {@code g*tan(bank)/airspeed}, which is what gets integrated into the
+     * heading here. Sideslip damping stops being a fight and becomes the thing that keeps the velocity pointing
+     * where the nose does.
+     *
+     * <p>Angles are integrated in Euler space rather than through a body-frame quaternion delta, because with an
+     * attitude command the roll/pitch coupling of the delta form is a disturbance the controller has to cancel
+     * rather than a behaviour anyone asked for. The quaternion is rebuilt from the result, so everything
+     * downstream (lift direction, camera, renderer) is unchanged.
+     */
+    private void integrateAttitudeBanked(final double dt) {
+        final double rateScale = resolveSpeedScale();
+        final double maxBank = FullfudServerConfig.SERVER.shahedMaxBankDegrees.get();
+        final double maxPitch = FullfudServerConfig.SERVER.shahedMaxPitchDegrees.get();
+        final double gain = FullfudServerConfig.SERVER.shahedAttitudeGain.get();
+
+        // The monitor sends mouse movement as a rotation delta with no centre of its own, so it rides on top of
+        // the key command and bleeds away; without that, one drag would leave the Shahed banked for good.
+        final double decay = Math.max(0.0D, 1.0D - MOUSE_ATTITUDE_CENTER_PER_SEC * dt);
+        mousePitchOffsetDeg = Mth.clamp(
+            mousePitchOffsetDeg * decay + Math.toDegrees(inputMousePitchDelta), -maxPitch, maxPitch);
+        mouseRollOffsetDeg = Mth.clamp(
+            mouseRollOffsetDeg * decay + Math.toDegrees(inputMouseRollDelta), -maxBank, maxBank);
+        inputMousePitchDelta = 0.0F;
+        inputMouseRollDelta = 0.0F;
+
+        final double commandedRoll = Mth.clamp(controlStrafe * maxBank + mouseRollOffsetDeg, -maxBank, maxBank);
+        final double commandedPitch = Mth.clamp(controlForward * maxPitch + mousePitchOffsetDeg, -maxPitch, maxPitch);
+
+        final double maxRollRate = Math.toRadians(MAX_ROLL_RATE * rateScale);
+        final double maxPitchRate = Math.toRadians(MAX_PITCH_RATE * rateScale);
+        final double targetRollRate = Mth.clamp(
+            Math.toRadians(commandedRoll - bodyRoll) * gain, -maxRollRate, maxRollRate);
+        final double targetPitchRate = Mth.clamp(
+            Math.toRadians(commandedPitch - bodyPitch) * gain, -maxPitchRate, maxPitchRate);
+        rollRate = approach(rollRate, targetRollRate, Math.toRadians(ROLL_ACCEL * rateScale) * dt);
+        pitchRate = approach(pitchRate, targetPitchRate, Math.toRadians(PITCH_ACCEL * rateScale) * dt);
+
+        bodyRoll = Mth.clamp(bodyRoll + Math.toDegrees(rollRate) * dt, -maxBank, maxBank);
+        bodyPitch = Mth.clamp(bodyPitch + Math.toDegrees(pitchRate) * dt, -85.0D, 85.0D);
+
+        final double turnRate = FullfudServerConfig.SERVER.shahedDirectTurn.get()
+            ? directTurnRate(bodyRoll, maxBank)
+            : coordinatedTurnRate(bodyRoll);
+        final double yawDeltaDegrees = Math.toDegrees(turnRate) * dt;
+        bodyYaw = Mth.wrapDegrees(bodyYaw + yawDeltaDegrees);
+        if (FullfudServerConfig.SERVER.shahedDirectTurn.get()) {
+            steerVelocityWithHeading(yawDeltaDegrees);
+        }
+
+        if (!Double.isFinite(bodyRoll)) {
+            bodyRoll = 0.0D;
+        }
+        if (!Double.isFinite(bodyPitch)) {
+            bodyPitch = 0.0D;
+        }
+        if (!Double.isFinite(bodyYaw)) {
+            bodyYaw = this.getYRot();
+        }
+
+        syncQuaternionFromBodyAngles();
+
+        this.setXRot((float) bodyPitch);
+        this.setYRot((float) bodyYaw);
+        this.setYHeadRot((float) bodyYaw);
+    }
+
+    /**
+     * Heading rate the bank produces when direct turning is on: a fixed rate scaled by how far into the bank the
+     * airframe is, so the turn starts as the wings drop and stops as they level.
+     *
+     * <p>Nothing about it is aerodynamic — {@link #coordinatedTurnRate} is the honest version, and at cruise
+     * speed it needs a circle several hundred blocks across. This one turns inside a few dozen, which is what
+     * makes the drone steerable from a monitor screen.
+     */
+    private double directTurnRate(final double bankDegrees, final double maxBankDegrees) {
+        final double bankFraction = Mth.clamp(bankDegrees / Math.max(1.0D, maxBankDegrees), -1.0D, 1.0D);
+        final double rate = Math.toRadians(FullfudServerConfig.SERVER.shahedDirectTurnDegreesPerSecond.get()) * bankFraction;
+        return Double.isFinite(rate) ? rate : 0.0D;
+    }
+
+    /**
+     * Carries the horizontal velocity around with the heading, so a turn changes where the drone is going and not
+     * only where it is pointing. Without this the flight path only bends as fast as {@link #applySideslipDamping}
+     * scrubs off the sideways component, which reads as the airframe sliding sideways through its own turn.
+     */
+    private void steerVelocityWithHeading(final double yawDeltaDegrees) {
+        if (yawDeltaDegrees == 0.0D || !Double.isFinite(yawDeltaDegrees)) {
+            return;
+        }
+        final double radians = Math.toRadians(yawDeltaDegrees);
+        final double cos = Math.cos(radians);
+        final double sin = Math.sin(radians);
+        // Minecraft yaw grows clockwise from +Z, so a heading of psi points at (-sin psi, cos psi): adding to the
+        // yaw rotates the horizontal components this way round.
+        linearVelocity = new Vec3(
+            linearVelocity.x * cos - linearVelocity.z * sin,
+            linearVelocity.y,
+            linearVelocity.z * cos + linearVelocity.x * sin
+        );
+    }
+
+    /**
+     * Heading rate, in radians per second, that a bank of {@code bankDegrees} produces at the current airspeed.
+     * Positive bank is right wing down, and in Minecraft's yaw convention turning right means increasing yaw.
+     */
+    private double coordinatedTurnRate(final double bankDegrees) {
+        final double airspeed = Math.max(MIN_TURN_AIRSPEED, linearVelocity.length());
+        final double rate = GRAVITY * Math.tan(Math.toRadians(Mth.clamp(bankDegrees, -80.0D, 80.0D))) / airspeed;
+        final double cap = Math.toRadians(FullfudServerConfig.SERVER.shahedMaxTurnRateDegreesPerSecond.get());
+        return Double.isFinite(rate) ? Mth.clamp(rate, -cap, cap) : 0.0D;
+    }
+
+    private void integrateAttitudeRates(final double dt) {
         syncQuaternionFromBodyAngles();
 
         final double rateScale = resolveSpeedScale();
@@ -803,6 +986,38 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         return new Vec3(x, 0.0D, z).normalize();
     }
 
+    /**
+     * Whether the terrain this tick's movement would cross has finished loading.
+     *
+     * <p>Vanilla's swept collision is exact at any speed, but only against blocks it can see:
+     * {@code getBlockCollisions} skips columns whose chunk is not yet at full status, and treats them as
+     * empty air. A Shahed cruising into freshly generated land outruns its own chunk ticket — 3.6 blocks
+     * a tick against a nine-by-nine region that still has to be generated — so it flies into a chunk that
+     * has no collision shapes yet, and by the time the chunk arrives the airframe is already inside a
+     * wall. That is the village-church case: through the blocks, then wedged inside the building.
+     *
+     * <p>Holding position for the tick or two the chunk needs is the cheap fix. The ticket is guaranteed
+     * to be in place while this matters — {@code shouldKeepChunksLoaded} is true for anything armed — so
+     * the stall always ends, and it is invisible next to a drone stuck in a roof.
+     *
+     * <p>The test covers the whole swept envelope rather than a few sample points on the centre line. Three
+     * samples at the destination left a gap the size of the airframe: the hull spans up to four blocks and
+     * this tick's travel adds three and a half more, so a wing can cross a column no sample ever touched —
+     * and one unloaded column is all it takes, because that is where the wall it flew through was.
+     */
+    private boolean isFlightPathTerrainReady(final Vec3 velPerTick) {
+        if (!(level() instanceof ServerLevel)) {
+            return true;
+        }
+        final AABB swept = getBoundingBox().expandTowards(velPerTick).inflate(1.0D, 0.0D, 1.0D);
+        return level().hasChunksAt(
+            Mth.floor(swept.minX),
+            Mth.floor(swept.minZ),
+            Mth.floor(swept.maxX),
+            Mth.floor(swept.maxZ)
+        );
+    }
+
     private void resolveCollisionVelocity() {
         if (this.verticalCollision && linearVelocity.y < 0.0D) {
             linearVelocity = new Vec3(linearVelocity.x * GROUND_FRICTION, 0.0D, linearVelocity.z * GROUND_FRICTION);
@@ -853,7 +1068,10 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         this.ownerViewDistance = Math.max(2, tag.getInt(TAG_OWNER_VIEW));
         this.armed = tag.getBoolean(TAG_ARMED);
         this.launchBaselineY = tag.contains(TAG_LAUNCH_Y) ? tag.getDouble(TAG_LAUNCH_Y) : this.getY();
-        this.fuelMass = tag.contains(TAG_FUEL) ? tag.getDouble(TAG_FUEL) : FUEL_CAPACITY_KG;
+        this.fuelMass = tag.contains(TAG_FUEL) ? tag.getDouble(TAG_FUEL) : 0.0D;
+        if (tag.contains(TAG_SERVICE_BAY, Tag.TAG_LIST)) {
+            getServiceBay().load(tag.getList(TAG_SERVICE_BAY, Tag.TAG_COMPOUND), registryAccess());
+        }
         this.speedScale = tag.contains(TAG_SPEED_SCALE, Tag.TAG_DOUBLE) ? tag.getDouble(TAG_SPEED_SCALE) : 1.0D;
         this.bodyYaw = tag.contains(TAG_BODY_YAW) ? tag.getDouble(TAG_BODY_YAW) : this.getYRot();
         this.bodyPitch = tag.contains(TAG_BODY_PITCH) ? tag.getDouble(TAG_BODY_PITCH) : this.getXRot();
@@ -888,7 +1106,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
                 Vec3 origin = new Vec3(tag.getDouble(TAG_SESS_X), tag.getDouble(TAG_SESS_Y), tag.getDouble(TAG_SESS_Z));
                 float yaw = tag.getFloat(TAG_SESS_YAW);
                 float pitch = tag.getFloat(TAG_SESS_PITCH);
-                ResourceKey<Level> dim = ResourceKey.create(Registries.DIMENSION, new ResourceLocation(tag.getString(TAG_SESS_DIM)));
+                ResourceKey<Level> dim = ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(tag.getString(TAG_SESS_DIM)));
                 GameType gm = GameType.byId(tag.getInt(TAG_SESS_GM));
                 this.controlSession = new ControlSession(dim, origin, yaw, pitch, gm);
             }
@@ -913,6 +1131,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         tag.putBoolean(TAG_ARMED, armed);
         tag.putDouble(TAG_LAUNCH_Y, launchBaselineY);
         tag.putDouble(TAG_FUEL, fuelMass);
+        tag.put(TAG_SERVICE_BAY, getServiceBay().save(registryAccess()));
         tag.putDouble(TAG_SPEED_SCALE, speedScale);
         tag.putDouble(TAG_BODY_YAW, bodyYaw);
         tag.putDouble(TAG_BODY_PITCH, bodyPitch);
@@ -946,13 +1165,22 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     }
 
     @Override
-    public Packet<ClientGamePacketListener> getAddEntityPacket() {
-        return NetworkHooks.getEntitySpawningPacket(this);
-    }
-
-    @Override
     public InteractionResult interact(final Player player, final InteractionHand hand) {
         final ItemStack heldItem = player.getItemInHand(hand);
+        if (heldItem.getItem() instanceof ScrewdriverItem) {
+            if (level().isClientSide) {
+                return InteractionResult.SUCCESS;
+            }
+            if (armed) {
+                player.displayClientMessage(Component.translatable("message.fullfud.shahed.armed"), true);
+                return InteractionResult.FAIL;
+            }
+            if (!(player instanceof ServerPlayer serverPlayer)
+                || !DroneServiceMenu.open(serverPlayer, this, getServiceBay(), false)) {
+                return InteractionResult.FAIL;
+            }
+            return InteractionResult.CONSUME;
+        }
         if (heldItem.getItem() instanceof MonitorItem) {
             if (!level().isClientSide && player instanceof ServerPlayer serverPlayer) {
                 if (!assignOwner(serverPlayer)) {
@@ -960,10 +1188,10 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
                     return InteractionResult.FAIL;
                 }
                 MonitorItem.setLinkedDrone(heldItem, this.getUUID());
-                FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> serverPlayer), new ShahedLinkPacket(this.getUUID(), true));
+                FullfudNetwork.sendToPlayer(serverPlayer, new ShahedLinkPacket(this.getUUID(), true));
                 player.displayClientMessage(Component.translatable("message.fullfud.monitor.linked"), true);
             }
-            return InteractionResult.sidedSuccess(level().isClientSide);
+            return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
         if (heldItem.isEmpty() && !level().isClientSide) {
             if (armed) {
@@ -972,7 +1200,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
             }
             final ItemStack droneStack = createItemStack();
             if (!player.addItem(droneStack)) {
-                spawnAtLocation(droneStack);
+                EntityDrops.spawnAtLocation(this, droneStack);
             }
             player.displayClientMessage(Component.translatable("message.fullfud.shahed.picked_up"), true);
             discard();
@@ -1045,7 +1273,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         if (sender == null) {
             return false;
         }
-        final CompoundTag root = sender.getPersistentData();
+        final CompoundTag root = PersistentData.of(sender);
         if (!root.contains(PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
             return tryRestoreRemoteTag(sender);
         }
@@ -1086,7 +1314,8 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
             getX() + maxRadius, getY() + 5.0D, getZ() + maxRadius
         );
         for (final RebEmitterEntity emitter : serverLevel.getEntitiesOfClass(RebEmitterEntity.class, searchBox)) {
-            if (!emitter.hasBattery() || emitter.getChargeTicks() <= 0) {
+            // Only a transmitting emitter counts; the default listening mode is a warning post, not a weapon.
+            if (!emitter.isJamming()) {
                 continue;
             }
             final double dx = emitter.getX() - getX();
@@ -1155,7 +1384,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
             if (player.distanceToSqr(this) > rangeSqr) {
                 continue;
             }
-            FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> player), packet);
+            FullfudNetwork.sendToPlayer(player, packet);
         }
     }
 
@@ -1182,7 +1411,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
                 data.fuelKg(),
                 data.airDensity()
         );
-        FullfudNetwork.getChannel().send(PacketDistributor.PLAYER.with(() -> viewer), packet);
+        FullfudNetwork.sendToPlayer(viewer, packet);
     }
 
     @Override
@@ -1238,11 +1467,6 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         setBoundingBox(box);
     }
 
-    @Override
-    public AABB getBoundingBoxForCulling() {
-        return super.getBoundingBoxForCulling().inflate(1.5D, 1.5D, 1.5D);
-    }
-
     private double computeSignalDistance(final ServerPlayer viewer) {
         if (controllingPlayer != null && controllingPlayer.equals(viewer.getUUID()) && controlSession != null) {
             if (controlSession.originPos == null) {
@@ -1288,18 +1512,24 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         return SHAHEED_DIMENSIONS;
     }
 
+    // Entity.hurt is final void since 1.21.2 and only forwards to hurtServer on a ServerLevel, so the
+    // former client-side guard is implicit. Entity.hurtServer is abstract, meaning there is no super to
+    // fall through to: 1.20.1's Entity.hurt did nothing but markHurt() and return false, so that is
+    // spelled out here.
     @Override
-    public boolean hurt(final DamageSource source, final float amount) {
+    public boolean hurtServer(final ServerLevel level, final DamageSource source, final float amount) {
         if (source.getDirectEntity() instanceof Projectile) {
-            if (!level().isClientSide()) {
-                handleProjectileImpact(source.getDirectEntity());
-            }
+            handleProjectileImpact(source.getDirectEntity());
             return true;
         }
-        return super.hurt(source, amount);
+        if (isInvulnerableToBase(source)) {
+            return false;
+        }
+        markHurt();
+        return false;
     }
 
-    private void handleProjectileImpact(@javax.annotation.Nullable final Entity directEntity) {
+    private void handleProjectileImpact(@org.jetbrains.annotations.Nullable final Entity directEntity) {
         projectileHitCount++;
         if (projectileHitCount >= 2) {
             detonate(directEntity != null ? directEntity.position() : position());
@@ -1341,14 +1571,79 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     }
 
     public ItemStack createItemStack() {
-        if (isSlowVariant()) {
-            return new ItemStack(getColor() == ShahedColor.BLACK
-                ? FullfudRegistries.SHAHED_BLACK_ITEM_SLOW.get()
-                : FullfudRegistries.SHAHED_ITEM_SLOW.get());
+        final ItemStack stack = new ItemStack(resolveDropItem());
+        // The loadout travels with the airframe. Tank fuel is a mass rather than a stack, so it needs its
+        // own component; the canisters, charge and anything else in the bay ride in CONTAINER.
+        getServiceBay().writeToStack(stack);
+        if (fuelMass > 0.0D) {
+            stack.set(FullfudDataComponents.DRONE_FUEL_KG, fuelMass);
         }
-        return new ItemStack(getColor() == ShahedColor.BLACK
+        return stack;
+    }
+
+    /** The other half of {@link #createItemStack()}, called by the launcher when it loads a munition. */
+    public void restoreLoadout(final ItemStack stack) {
+        getServiceBay().readFromStack(stack);
+        final Double fuel = stack.get(FullfudDataComponents.DRONE_FUEL_KG);
+        if (fuel != null && Double.isFinite(fuel)) {
+            this.fuelMass = Mth.clamp(fuel, 0.0D, FUEL_CAPACITY_KG);
+        }
+    }
+
+    public DroneServiceBay getServiceBay() {
+        if (this.serviceBay == null) {
+            this.serviceBay = new DroneServiceBay(
+                0,
+                WarheadCharge.SHAHED_MAX.tier(),
+                null,
+                this::canServiceFrom
+            );
+        }
+        return this.serviceBay;
+    }
+
+    /** The charge currently bolted in, or {@link WarheadCharge#NONE} for an anti-personnel impact. */
+    public WarheadCharge getWarhead() {
+        return getServiceBay().warhead();
+    }
+
+    public double getFuelMass() {
+        return this.fuelMass;
+    }
+
+    private boolean canServiceFrom(final Player player) {
+        // No owner check, matching the FPV bay: the launcher crew is whoever is standing there.
+        return isAlive() && player.distanceToSqr(this) <= SERVICE_REACH_SQR;
+    }
+
+    /**
+     * Empties fuel canisters out of the power slot and into the tank, one per tick, while the airframe is
+     * sitting still. Only whole canisters go in, so the tank never ends up with a fractional third and the
+     * player can leave a spare in the slot without it evaporating.
+     */
+    private void installFuelFromBay() {
+        final DroneServiceBay bay = getServiceBay();
+        final ItemStack power = bay.powerStack();
+        if (power.isEmpty() || !power.is(FullfudRegistries.SHAHED_FUEL_ITEM.get())) {
+            return;
+        }
+        if (this.fuelMass + FUEL_PER_CANISTER_KG > FUEL_CAPACITY_KG + 1.0E-6D) {
+            return;
+        }
+        power.shrink(1);
+        bay.setChanged();
+        this.fuelMass = Math.min(FUEL_CAPACITY_KG, this.fuelMass + FUEL_PER_CANISTER_KG);
+    }
+
+    private net.minecraft.world.item.Item resolveDropItem() {
+        if (isSlowVariant()) {
+            return getColor() == ShahedColor.BLACK
+                ? FullfudRegistries.SHAHED_BLACK_ITEM_SLOW.get()
+                : FullfudRegistries.SHAHED_ITEM_SLOW.get();
+        }
+        return getColor() == ShahedColor.BLACK
             ? FullfudRegistries.SHAHED_BLACK_ITEM.get()
-            : FullfudRegistries.SHAHED_ITEM.get());
+            : FullfudRegistries.SHAHED_ITEM.get();
     }
 
     private boolean isSlowVariant() {
@@ -1421,7 +1716,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         }
         if (!level().isClientSide) {
             final ItemStack stack = createItemStack();
-            spawnAtLocation(stack);
+            EntityDrops.spawnAtLocation(this, stack);
             discard();
         }
     }
@@ -1482,9 +1777,12 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         super.remove(reason);
     }
 
-    @Override
-    public void onAddedToWorld() {
-        super.onAddedToWorld();
+    /**
+     * Was an {@code onAddedToWorld} override — a method Forge added to {@code Entity}. Vanilla has no
+     * equivalent, so {@code ChunkLoadEvents} calls this from {@code ServerEntityEvents.ENTITY_LOAD},
+     * which fires from the same place Forge's hook did. That event is server-only, hence no client half.
+     */
+    public void onAddedToServerLevel() {
         if (!level().isClientSide() && ownerUUID != null && level() instanceof ServerLevel serverLevel) {
             ShahedLinkData.get(serverLevel).link(getUUID(), ownerUUID);
             recalcDesiredChunkRadius();
@@ -1599,23 +1897,110 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         }
     }
 
-    private boolean detectImpact() {
-        if (this.horizontalCollision || this.verticalCollision) {
-            return hasDangerousSpeed();
+    /**
+     * Where this tick's flight ran into terrain, or {@code null} if it did not.
+     *
+     * <p>Sampling only the block the drone currently occupies is not enough at cruise: the airframe
+     * covers up to {@code MAX_AIRSPEED} m/s, some 3.6 blocks per tick, so a one-block church wall fits
+     * entirely between two samples — the drone passes through it and parks inside the building. Sweeping
+     * the segment the drone actually flew closes that gap, and the hit location gives the blast the
+     * wall's coordinates instead of the interior's.
+     *
+     * <p>Three rays rather than one because the hull is three blocks wide: a wingtip can reach a wall
+     * the centre line misses. The nearest of the three wins, so the blast lands where the airframe first
+     * touched.
+     */
+    @org.jetbrains.annotations.Nullable
+    private Vec3 resolveBlockImpactOrigin() {
+        if (!hasDangerousSpeed()) {
+            return null;
         }
+        // move() already stopped us: no need to look for what we hit, we are against it.
+        if (this.horizontalCollision || this.verticalCollision) {
+            return position();
+        }
+
+        final Vec3 to = position();
+        final Vec3 from = lastFlightStart;
+        if (from != null && from.distanceToSqr(to) > 1.0E-6D) {
+            final double yawRad = Math.toRadians(getYRot());
+            final Vec3 span = new Vec3(Math.cos(yawRad), 0.0D, Math.sin(yawRad));
+            Vec3 nearest = null;
+            double nearestDistSqr = Double.MAX_VALUE;
+            for (final double offset : new double[] { 0.0D, -1.3D, 1.3D }) {
+                final Vec3 lateral = span.scale(offset).add(0.0D, 0.5D, 0.0D);
+                final BlockHitResult hit = level().clip(new ClipContext(
+                    from.add(lateral), to.add(lateral), ClipContext.Block.COLLIDER, ClipContext.Fluid.NONE, this));
+                if (hit.getType() == HitResult.Type.MISS) {
+                    continue;
+                }
+                final double distSqr = from.distanceToSqr(hit.getLocation());
+                if (distSqr < nearestDistSqr) {
+                    nearestDistSqr = distSqr;
+                    nearest = hit.getLocation();
+                }
+            }
+            if (nearest != null) {
+                return nearest;
+            }
+        }
+
         final BlockState state = level().getBlockState(blockPosition());
         final BlockState below = level().getBlockState(blockPosition().below());
         if (!state.isAir() || !below.isAir()) {
-            return hasDangerousSpeed();
+            return to;
         }
         final int x = Mth.floor(getX());
         final int z = Mth.floor(getZ());
         final int terrainY = level().getHeight(Heightmap.Types.MOTION_BLOCKING, x, z);
-        return this.getY() <= terrainY + 0.15D && hasDangerousSpeed();
+        return this.getY() <= terrainY + 0.15D ? to : null;
     }
 
     private boolean hasDangerousSpeed() {
         return linearVelocity.lengthSqr() > 1.0D;
+    }
+
+    /**
+     * Failsafe for an airframe that has stopped flying against the world instead of exploding on it.
+     *
+     * <p>Every speed-based check answers no once a stuck drone has bled off its velocity against
+     * {@code GROUND_FRICTION}, which is how a Shahed ends up hanging silently inside a roof forever. Three
+     * conditions together end the flight regardless of what the telemetry says: the hull is touching
+     * terrain, the airframe went nowhere this tick, and that is not the deliberate hold from
+     * {@link #isFlightPathTerrainReady}. Held for {@link #WEDGED_DETONATE_TICKS} ticks, that is a wreck.
+     *
+     * <p>Two holes in the first version, both of which left drones hanging. It sampled only the block under
+     * {@code position()} — but the hull is three blocks across (four and a quarter of axis-aligned envelope
+     * when the heading is diagonal) and one block tall, so a drone caught on a church roof or between two
+     * walls has its centre point in plain air more often than not, and the counter reset every tick. And it
+     * asked for penetration, when the airframe {@code move} politely stopped flush against a wall at a speed
+     * under the {@link #hasDangerousSpeed} bar is just as finished: contact is the test, not overlap.
+     *
+     * <p>The travel condition is what keeps that from being trigger-happy. A launch climbing out through a
+     * canopy has leaf shapes inside the envelope for the whole climb, and a drone banking past a wall clips
+     * it for a tick or two — both are still moving, so neither counts.
+     */
+    private boolean isWedgedInTerrain() {
+        if (isOnLauncher() || noPhysics) {
+            wedgedTicks = 0;
+            return false;
+        }
+        if (terrainStalled) {
+            wedgedTicks = 0;
+            return false;
+        }
+        if (lastFlightStart != null && lastFlightStart.distanceToSqr(position()) > WEDGE_STALL_EPS_SQR) {
+            wedgedTicks = 0;
+            return false;
+        }
+        final AABB hull = getBoundingBox().inflate(WEDGE_CONTACT_MARGIN);
+        for (final VoxelShape shape : level().getBlockCollisions(this, hull)) {
+            if (!shape.isEmpty()) {
+                return ++wedgedTicks >= WEDGED_DETONATE_TICKS;
+            }
+        }
+        wedgedTicks = 0;
+        return false;
     }
 
     private void detonate() {
@@ -1639,22 +2024,63 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         } else {
             endRemoteControl(null);
         }
-        spawnTntEffect(controller, explosionDirection);
+        spawnTntEffect(controller, getWarhead(), explosionDirection);
+        grantStrikeAdvancement(controller);
         discard();
     }
 
-    private void spawnTntEffect(@javax.annotation.Nullable final ServerPlayer controller, @javax.annotation.Nullable final Vec3 explosionDirection) {
+    /**
+     * A Shahed usually goes off with nobody watching through it, so the credit follows the owner rather than
+     * the current viewer. Only a charged airframe counts — an empty one falling out of the sky is a crash.
+     */
+    private void grantStrikeAdvancement(@org.jetbrains.annotations.Nullable final ServerPlayer controller) {
+        if (!getWarhead().isPresent()) {
+            return;
+        }
+        if (controller != null) {
+            FullfudAdvancements.grant(controller, FullfudAdvancements.SHAHED_STRIKE);
+            return;
+        }
+        if (ownerUUID != null && level() instanceof ServerLevel serverLevel) {
+            FullfudAdvancements.grant(serverLevel.getServer().getPlayerList().getPlayer(ownerUUID),
+                FullfudAdvancements.SHAHED_STRIKE);
+        }
+    }
+
+    private void spawnTntEffect(
+        @org.jetbrains.annotations.Nullable final ServerPlayer controller,
+        final WarheadCharge charge,
+        @org.jetbrains.annotations.Nullable final Vec3 explosionDirection
+    ) {
         if (!(level() instanceof ServerLevel serverLevel)) {
             return;
         }
         final PrimedTnt tnt = new PrimedTnt(serverLevel, getX(), getY(), getZ(), controller);
         tnt.setFuse(0);
         RemotePlayerProtection.markHazard(tnt, this);
-        DroneExplosionLimiter.markNoBlockDamage(tnt);
+        // A charge is what breaks blocks. Without one the airframe still hits hard enough to kill, which
+        // the mod's own blast model below does, but the terrain is left standing.
+        if (!charge.isPresent()) {
+            DroneExplosionLimiter.markNoBlockDamage(tnt);
+        }
         DroneExplosionLimiter.markNoEntityDamage(tnt);
         serverLevel.addFreshEntity(tnt);
-        serverLevel.explode(tnt, getX(), getY(), getZ(), SHAHED_FIREBALL_POWER, net.minecraft.world.level.Level.ExplosionInteraction.MOB);
-        DroneExplosionEffects.afterShahedExplosion(serverLevel, tnt, controller, explosionDirection);
+        serverLevel.explode(
+            tnt,
+            getX(),
+            getY(),
+            getZ(),
+            charge.isPresent() ? charge.power() : SHAHED_FIREBALL_POWER,
+            charge.incendiary(),
+            charge.isPresent()
+                ? net.minecraft.world.level.Level.ExplosionInteraction.TNT
+                : net.minecraft.world.level.Level.ExplosionInteraction.MOB
+        );
+        DroneExplosionEffects.afterShahedExplosion(
+            serverLevel, tnt, controller, explosionDirection, charge.blastScale());
+        if (charge.isPresent()) {
+            BlastLightRefresh.schedule(serverLevel, position(), charge.power());
+        }
         tnt.discard();
     }
 
@@ -1691,9 +2117,12 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         this.controlVertical = 0.0F;
         this.inputMousePitchDelta = 0.0F;
         this.inputMouseRollDelta = 0.0F;
+        this.mousePitchOffsetDeg = 0.0D;
+        this.mouseRollOffsetDeg = 0.0D;
         this.rollRate = 0.0D;
         this.pitchRate = 0.0D;
-        this.fuelMass = FUEL_CAPACITY_KG;
+        // Fuel is deliberately not touched here: it arrives with the item form through restoreLoadout, or
+        // is poured in through the service bay, and resetting it would silently empty a loaded tank.
         this.telemetry = FlightTelemetry.ZERO;
         this.bodyYaw = this.getYRot();
         this.bodyPitch = 0.0D;
@@ -1809,14 +2238,14 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         if (controlSession.originalGameType != null) {
             tag.putInt(PLAYER_TAG_ORIGIN_GM, controlSession.originalGameType.getId());
         }
-        player.getPersistentData().put(PLAYER_REMOTE_TAG, tag);
+        PersistentData.of(player).put(PLAYER_REMOTE_TAG, tag);
     }
 
     private static void clearRemoteTag(final ServerPlayer player) {
         if (player == null) {
             return;
         }
-        final CompoundTag root = player.getPersistentData();
+        final CompoundTag root = PersistentData.of(player);
         root.remove(PLAYER_REMOTE_TAG);
     }
 
@@ -1835,6 +2264,8 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         controlVertical = 0.0F;
         inputMousePitchDelta = 0.0F;
         inputMouseRollDelta = 0.0F;
+        mousePitchOffsetDeg = 0.0D;
+        mouseRollOffsetDeg = 0.0D;
         controlTimeout = 0;
         menuGraceTicks = 0;
         rollRate = 0.0D;
@@ -1977,8 +2408,11 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         final ServerLevel targetLevel = server != null ? server.getLevel(session.originDimension) : player.serverLevel();
         if (targetLevel != null) {
             final ChunkPos chunkPos = new ChunkPos(BlockPos.containing(session.originPos));
-            targetLevel.getChunkSource().addRegionTicket(net.minecraft.server.level.TicketType.POST_TELEPORT, chunkPos, 1, player.getId());
-            player.teleportTo(targetLevel, session.originPos.x, session.originPos.y, session.originPos.z, session.originYaw, session.originPitch);
+            ChunkLoadManager.warmTeleportDestination(targetLevel, chunkPos, player.getId());
+            // 1.21.2 folded the relative-movement flags and the reset-camera behaviour into teleportTo's
+            // signature. An empty Set is an absolute teleport, and the trailing true is the setCamera(this)
+            // that the old 6-arg overload did unconditionally.
+            player.teleportTo(targetLevel, session.originPos.x, session.originPos.y, session.originPos.z, Set.of(), session.originYaw, session.originPitch, true);
             player.fallDistance = 0.0F;
         }
         resetViewCenter(player);
@@ -2002,8 +2436,8 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
                 final float yaw = tag.getFloat(PLAYER_TAG_ORIGIN_YAW);
                 final float pitch = tag.getFloat(PLAYER_TAG_ORIGIN_PITCH);
                 final ChunkPos ticketChunk = new ChunkPos(BlockPos.containing(x, y, z));
-                targetLevel.getChunkSource().addRegionTicket(net.minecraft.server.level.TicketType.POST_TELEPORT, ticketChunk, 1, player.getId());
-                player.teleportTo(targetLevel, x, y, z, yaw, pitch);
+                ChunkLoadManager.warmTeleportDestination(targetLevel, ticketChunk, player.getId());
+                player.teleportTo(targetLevel, x, y, z, Set.of(), yaw, pitch, true);
                 player.fallDistance = 0.0F;
             }
         }

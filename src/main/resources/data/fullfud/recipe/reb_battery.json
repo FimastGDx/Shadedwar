@@ -1,0 +1,14 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "fullfud:lithium",
+    "fullfud:lithium",
+    "fullfud:wire_copper_new",
+    "fullfud:wire_copper_new",
+    "fullfud:insert_steel"
+  ],
+  "result": {
+    "id": "fullfud:reb_battery",
+    "count": 1
+  }
+}

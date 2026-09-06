@@ -1,0 +1,8 @@
+{
+  "replace": false,
+  "values": [
+    "fullfud:fpv_drone_cargo",
+    "fullfud:fpv_drone_cargo_x2",
+    "fullfud:fpv_drone_cargo_x4"
+  ]
+}

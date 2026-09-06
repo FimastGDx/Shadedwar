@@ -2,10 +2,10 @@ package com.fullfud.fullfud.client.sound;
 
 import net.minecraft.util.Mth;
 import net.minecraft.world.phys.Vec3;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
 
-@OnlyIn(Dist.CLIENT)
+@Environment(EnvType.CLIENT)
 public final class DroneSoundEffects {
     private static final double SPEED_OF_SOUND = 110.0D;
     private static final double MAX_RADIAL_SPEED_RATIO = 0.35D;

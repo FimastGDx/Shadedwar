@@ -1,6 +1,9 @@
 package com.fullfud.fullfud.client;
 
 import com.fullfud.fullfud.FullfudMod;
+import com.fullfud.fullfud.client.warning.DroneWarning;
+import com.fullfud.fullfud.client.warning.DroneWarningOverlay;
+import com.fullfud.fullfud.client.warning.DroneWarningSources;
 import com.fullfud.fullfud.common.entity.FpvDroneEntity;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
@@ -8,6 +11,7 @@ import net.minecraft.core.BlockPos;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.util.Mth;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -56,9 +60,9 @@ public final class FpvOsdHudRenderer {
 
     private static final BfGlyphFont GLYPH_FONT = new BfGlyphFont();
     private static final BfGlyphFont CROSSHAIR_FONT = new BfGlyphFont(
-            new ResourceLocation(FullfudMod.MOD_ID, "osd/crosshair_thin.mcm"),
-            new ResourceLocation(FullfudMod.MOD_ID, "osd/default.mcm"),
-            new ResourceLocation(FullfudMod.MOD_ID, "osd/betaflight.mcm")
+            ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "osd/crosshair_thin.mcm"),
+            ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "osd/default.mcm"),
+            ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "osd/betaflight.mcm")
     );
     private static final int OSD_FG_COLOR = 0xFFFFFFFF;
     private static final int OSD_BG_COLOR = 0xCC000000;
@@ -66,6 +70,8 @@ public final class FpvOsdHudRenderer {
     private static final float OSD_GLYPH_SCALE = 1.0f;
     private static final int BATTERY_MAX_TICKS = 12000;
     private static final int BATTERY_CAPACITY_MAH = 1500;
+    /** First grid row of the alert block: clear of the horizon above it and of the coordinate line below. */
+    private static final int WARNING_TOP_ROW = 9;
 
     private static UUID sessionDroneId;
     private static long sessionStartMillis;
@@ -125,6 +131,9 @@ public final class FpvOsdHudRenderer {
             launchZ = drone.getZ();
             lastDroneY = launchY;
             tempSmooth = 22.0f;
+            // A new drone is a new flight: whatever was flashing on the last one has nothing to say about this
+            // one, and its alerts should announce themselves again rather than wait out a repeat interval.
+            DroneWarningSources.reset();
         }
 
         final double dtSeconds = lastFrameNanos == 0L ? 0.0 : (nowNanos - lastFrameNanos) / 1_000_000_000.0;
@@ -194,7 +203,9 @@ public final class FpvOsdHudRenderer {
         tempSmooth += (tempTarget - tempSmooth) * 0.07f;
         final int temperatureC = Mth.clamp(Math.round(tempSmooth), -20, 120);
 
-        final float partialTick = minecraft.getPartialTick();
+        // 1.21 replaced Minecraft.getFrameTime() with the DeltaTracker; false asks for the paused-aware
+        // game-time delta, which is what the old float was.
+        final float partialTick = minecraft.getDeltaTracker().getGameTimeDeltaPartialTick(false);
         float rawHeading = normalizeDegrees(drone.getVisualYaw(partialTick));
         if (!Float.isFinite(rawHeading)) {
             rawHeading = 0.0f;
@@ -240,6 +251,12 @@ public final class FpvOsdHudRenderer {
         final int[] ampCodes = concat(ascii((amperageDeci / 10) + "." + (amperageDeci % 10)), new int[]{SYM_AMP});
         final int[] mahCodes = concat(ascii(String.valueOf(mahUsed)), new int[]{SYM_MAH});
         final int[] tempCodes = concat(new int[]{SYM_TEMPERATURE}, ascii(String.valueOf(temperatureC)), new int[]{SYM_TEMP_C});
+        // Block coordinates, floored the way F3 reports them — the debug screen is useless behind the goggles
+        // view, and the home arrow only ever gives a bearing back to the launch point. Y duplicates the
+        // altitude field on purpose: a position is only worth reading if all three numbers sit on one line.
+        final int[] coordinateCodes = ascii(
+                "X" + Mth.floor(drone.getX()) + " Y" + Mth.floor(drone.getY()) + " Z" + Mth.floor(drone.getZ())
+        );
 
         drawCodesAt(
                 guiGraphics,
@@ -342,6 +359,51 @@ public final class FpvOsdHudRenderer {
                 tempCodes,
                 OSD_GLYPH_SCALE
         );
+        drawCodesAt(
+                guiGraphics,
+                (guiW - codesWidth(coordinateCodes, OSD_GLYPH_SCALE)) / 2,
+                rowToGlyphY(gridY, cellH, bottomRow - 1, OSD_GLYPH_SCALE),
+                coordinateCodes,
+                OSD_GLYPH_SCALE
+        );
+        drawWarnings(guiGraphics, minecraft, drone, gridY, cellH, guiW, partialTick);
+    }
+
+    /**
+     * The alert block, centred under the artificial horizon: cautions above warnings, red above amber, every
+     * line flashing on the one clock in {@link DroneWarningOverlay} so they pulse together.
+     */
+    private static void drawWarnings(
+            final GuiGraphics guiGraphics,
+            final Minecraft minecraft,
+            final FpvDroneEntity drone,
+            final int gridY,
+            final int cellH,
+            final int guiW,
+            final float partialTick
+    ) {
+        final List<DroneWarning> active = DroneWarningOverlay.prioritise(
+                DroneWarningSources.collectFpv(minecraft, drone, partialTick)
+        );
+        // Called even with nothing up: this is what advances the flash clock and clears the audio state.
+        final float brightness = DroneWarningOverlay.update(active);
+        if (active.isEmpty() || brightness <= 0.02f) {
+            return;
+        }
+        final int background = DroneWarningOverlay.backgroundColor(brightness);
+        for (int i = 0; i < active.size(); i++) {
+            final DroneWarning warning = active.get(i);
+            final int[] codes = ascii(warning.text());
+            drawCodesColored(
+                    guiGraphics,
+                    (guiW - codesWidth(codes, OSD_GLYPH_SCALE)) / 2,
+                    rowToGlyphY(gridY, cellH, WARNING_TOP_ROW + i, OSD_GLYPH_SCALE),
+                    codes,
+                    OSD_GLYPH_SCALE,
+                    DroneWarningOverlay.textColor(warning.level(), brightness),
+                    background
+            );
+        }
     }
 
     private static void drawCrosshair(
@@ -473,6 +535,18 @@ public final class FpvOsdHudRenderer {
             final int[] codes,
             final float glyphScale
     ) {
+        drawCodesColored(guiGraphics, startX, y, codes, glyphScale, OSD_FG_COLOR, OSD_BG_COLOR);
+    }
+
+    private static void drawCodesColored(
+            final GuiGraphics guiGraphics,
+            final int startX,
+            final int y,
+            final int[] codes,
+            final float glyphScale,
+            final int foregroundColor,
+            final int backgroundColor
+    ) {
         if (codes == null || codes.length == 0) {
             return;
         }
@@ -484,8 +558,8 @@ public final class FpvOsdHudRenderer {
                     startX + i * step,
                     y,
                     glyphScale,
-                    OSD_FG_COLOR,
-                    OSD_BG_COLOR
+                    foregroundColor,
+                    backgroundColor
             );
         }
     }

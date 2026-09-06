@@ -1,11 +1,11 @@
 package com.fullfud.fullfud.core.network.packet;
 
-import com.fullfud.fullfud.core.network.handler.DroneAudioNetworkHandlers;
+import com.fullfud.fullfud.core.network.FullfudNetwork;
+import net.minecraft.network.codec.StreamCodec;
+import net.minecraft.network.protocol.common.custom.CustomPacketPayload;
 import net.minecraft.network.FriendlyByteBuf;
-import net.minecraftforge.network.NetworkEvent;
 
 import java.util.UUID;
-import java.util.function.Supplier;
 
 public record DroneAudioLoopPacket(byte droneType,
                                   UUID droneId,
@@ -14,7 +14,13 @@ public record DroneAudioLoopPacket(byte droneType,
                                   double z,
                                   float volume,
                                   float pitch,
-                                  boolean active) {
+                                  boolean active) implements CustomPacketPayload {
+
+    public static final CustomPacketPayload.Type<DroneAudioLoopPacket> TYPE =
+        new CustomPacketPayload.Type<>(FullfudNetwork.id("drone_audio_loop"));
+
+    public static final StreamCodec<FriendlyByteBuf, DroneAudioLoopPacket> STREAM_CODEC =
+        CustomPacketPayload.codec(DroneAudioLoopPacket::write, DroneAudioLoopPacket::decode);
 
     public static DroneAudioLoopPacket decode(final FriendlyByteBuf buffer) {
         final byte type = buffer.readByte();
@@ -28,7 +34,7 @@ public record DroneAudioLoopPacket(byte droneType,
         return new DroneAudioLoopPacket(type, id, x, y, z, volume, pitch, active);
     }
 
-    public void encode(final FriendlyByteBuf buffer) {
+    public void write(final FriendlyByteBuf buffer) {
         buffer.writeByte(droneType);
         buffer.writeUUID(droneId);
         buffer.writeDouble(x);
@@ -39,14 +45,9 @@ public record DroneAudioLoopPacket(byte droneType,
         buffer.writeBoolean(active);
     }
 
-    public void handle(final Supplier<NetworkEvent.Context> contextSupplier) {
-        final NetworkEvent.Context context = contextSupplier.get();
-        if (!context.getDirection().getReceptionSide().isClient()) {
-            context.setPacketHandled(true);
-            return;
-        }
-        context.enqueueWork(() -> DroneAudioNetworkHandlers.handleLoop(this));
-        context.setPacketHandled(true);
+    @Override
+    public CustomPacketPayload.Type<? extends CustomPacketPayload> type() {
+        return TYPE;
     }
 }
 

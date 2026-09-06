@@ -1,0 +1,16 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "III",
+    "PPP",
+    "I I"
+  ],
+  "key": {
+    "I": "fullfud:ingot_steel",
+    "P": "fullfud:insert_steel"
+  },
+  "result": {
+    "id": "fullfud:shahed_launcher",
+    "count": 1
+  }
+}

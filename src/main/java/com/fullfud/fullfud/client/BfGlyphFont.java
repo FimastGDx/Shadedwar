@@ -23,8 +23,8 @@ public class BfGlyphFont {
     private static final int MCM_CHAR_FIELD_BYTES = 64;
     private static final int MCM_PIXELS_PER_BYTE = 4;
     private static final ResourceLocation[] DEFAULT_FONT_RESOURCES = new ResourceLocation[]{
-            new ResourceLocation(FullfudMod.MOD_ID, "osd/default.mcm"),
-            new ResourceLocation(FullfudMod.MOD_ID, "osd/betaflight.mcm")
+            ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "osd/default.mcm"),
+            ResourceLocation.fromNamespaceAndPath(FullfudMod.MOD_ID, "osd/betaflight.mcm")
     };
 
     private final ResourceLocation[] fontResources;

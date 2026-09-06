@@ -15,17 +15,15 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: 17
+          java-version: 21
           cache: gradle
       - name: Grant permissions to Gradle
         run: chmod +x ./gradlew
-      - name: Assemble mod jars
-        run: ./gradlew assemble reobfJar
+      - name: Build mod jar
+        run: ./gradlew build
       - name: Upload mod jars
         uses: actions/upload-artifact@v4
         with:
           name: mod-jars
-          path: |
-            build/libs/*.jar
-            build/reobfJar/**/*.jar
+          path: build/libs/*.jar
           if-no-files-found: error

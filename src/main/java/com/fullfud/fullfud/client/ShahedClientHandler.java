@@ -5,6 +5,7 @@ import com.fullfud.fullfud.client.render.RebEmitterRenderer;
 import com.fullfud.fullfud.client.render.Fp5LauncherRenderer;
 import com.fullfud.fullfud.client.render.ShahedDroneRenderer;
 import com.fullfud.fullfud.client.render.ShahedLauncherRenderer;
+import com.fullfud.fullfud.client.screen.DroneServiceScreen;
 import com.fullfud.fullfud.client.screen.Fp5MonitorScreen;
 import com.fullfud.fullfud.client.screen.ShahedMonitorScreen;
 import com.fullfud.fullfud.client.sound.DroneSoundEffects;
@@ -16,7 +17,7 @@ import com.fullfud.fullfud.common.item.MonitorItem;
 import com.fullfud.fullfud.common.item.RebBatteryItem;
 import com.fullfud.fullfud.core.FullfudRegistries;
 import com.fullfud.fullfud.core.config.FullfudClientConfig;
-import com.fullfud.fullfud.core.network.FullfudNetwork;
+import com.fullfud.fullfud.core.network.FullfudClientNetwork;
 import com.fullfud.fullfud.core.network.packet.ShahedControlPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedGhostUpdatePacket;
 import com.fullfud.fullfud.core.network.packet.ShahedLinkPacket;
@@ -24,18 +25,18 @@ import com.fullfud.fullfud.core.network.packet.ShahedStatusPacket;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.BufferBuilder;
-import com.mojang.blaze3d.vertex.BufferBuilder.RenderedBuffer;
 import com.mojang.blaze3d.vertex.BufferUploader;
 import com.mojang.blaze3d.vertex.DefaultVertexFormat;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.blaze3d.vertex.Tesselator;
 import com.mojang.blaze3d.vertex.VertexFormat;
+import net.minecraft.client.Camera;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.MenuScreens;
-import net.minecraft.client.renderer.GameRenderer;
+import net.minecraft.client.renderer.CoreShaders;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
@@ -50,19 +51,14 @@ import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.phys.EntityHitResult;
 import net.minecraft.world.phys.Vec3;
 import net.minecraft.world.level.LightLayer;
-import net.minecraftforge.api.distmarker.Dist;
-import net.minecraftforge.api.distmarker.OnlyIn;
-import net.minecraftforge.client.event.EntityRenderersEvent;
-import net.minecraftforge.client.event.RegisterKeyMappingsEvent;
-import net.minecraftforge.client.event.RenderGuiEvent;
-import net.minecraftforge.client.event.RenderHandEvent;
-import net.minecraftforge.client.event.RenderLevelStageEvent;
-import net.minecraftforge.client.event.ViewportEvent;
-import net.minecraftforge.common.MinecraftForge;
-import net.minecraftforge.event.PlayLevelSoundEvent;
-import net.minecraftforge.event.TickEvent;
-import net.minecraftforge.eventbus.api.IEventBus;
-import net.minecraftforge.fml.event.lifecycle.FMLClientSetupEvent;
+import net.fabricmc.api.EnvType;
+import net.fabricmc.api.Environment;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
+import net.fabricmc.fabric.api.client.rendering.v1.EntityRendererRegistry;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderEvents;
+import net.fabricmc.fabric.api.client.rendering.v1.WorldRenderContext;
+import org.joml.Matrix4f;
 import org.lwjgl.glfw.GLFW;
 
 import java.util.HashMap;
@@ -72,7 +68,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
 
-@OnlyIn(Dist.CLIENT)
+@Environment(EnvType.CLIENT)
 public final class ShahedClientHandler {
     private static final KeyMapping POWER_UP = new KeyMapping(
         "key.fullfud.power_up",
@@ -80,10 +76,11 @@ public final class ShahedClientHandler {
         GLFW.GLFW_KEY_R,
         "key.categories.fullfud"
     );
+    /** G, not the F it used to be: F is vanilla swap-offhand. See {@code KeyBindMigration}. */
     private static final KeyMapping POWER_DOWN = new KeyMapping(
         "key.fullfud.power_down",
         InputConstants.Type.KEYSYM,
-        GLFW.GLFW_KEY_F,
+        GLFW.GLFW_KEY_G,
         "key.categories.fullfud"
     );
 
@@ -101,35 +98,31 @@ public final class ShahedClientHandler {
     private ShahedClientHandler() {
     }
 
-    public static void registerClientEvents(final IEventBus modEventBus) {
-        modEventBus.addListener(ShahedClientHandler::onRegisterRenderers);
-        modEventBus.addListener(ShahedClientHandler::onRegisterKeyMappings);
-    }
+    /**
+     * Called from {@code FullfudClientMod}. Forge needed three phases for this — two mod-bus listeners plus
+     * {@code FMLClientSetupEvent} — because the renderer, key-mapping and screen registries were only open
+     * during startup; Fabric's client initializer is that window.
+     *
+     * <p>The camera angles, the HUD, the hand and the entity-sound cancel have no Fabric API event and are
+     * driven from {@code mixin.client} instead — see {@code GameRendererMixin}, {@code GuiMixin},
+     * {@code ItemInHandRendererMixin} and {@code LevelSoundMixin}.
+     */
+    public static void registerClientEvents() {
+        EntityRendererRegistry.register(FullfudRegistries.SHAHED_ENTITY.get(), ShahedDroneRenderer::new);
+        EntityRendererRegistry.register(FullfudRegistries.SHAHED_LAUNCHER_ENTITY.get(), ShahedLauncherRenderer::new);
+        EntityRendererRegistry.register(FullfudRegistries.FP5_FLAMINGO_ENTITY.get(), Fp5FlamingoRenderer::new);
+        EntityRendererRegistry.register(FullfudRegistries.FP5_LAUNCHER_ENTITY.get(), Fp5LauncherRenderer::new);
+        EntityRendererRegistry.register(FullfudRegistries.REB_EMITTER_ENTITY.get(), RebEmitterRenderer::new);
 
-    public static void onClientSetup(final FMLClientSetupEvent event) {
-        event.enqueueWork(() -> {
-            MenuScreens.register(FullfudRegistries.SHAHED_MONITOR_MENU.get(), ShahedMonitorScreen::new);
-            MenuScreens.register(FullfudRegistries.FP5_MONITOR_MENU.get(), Fp5MonitorScreen::new);
-            MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onClientTick);
-            MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderLevelStage);
-            MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderGui);
-            MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onComputeCameraAngles);
-            MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onRenderHand);
-            MinecraftForge.EVENT_BUS.addListener(ShahedClientHandler::onPlayLevelSoundAtEntity);
-        });
-    }
+        KeyBindingHelper.registerKeyBinding(POWER_UP);
+        KeyBindingHelper.registerKeyBinding(POWER_DOWN);
 
-    public static void onRegisterRenderers(final EntityRenderersEvent.RegisterRenderers event) {
-        event.registerEntityRenderer(FullfudRegistries.SHAHED_ENTITY.get(), ShahedDroneRenderer::new);
-        event.registerEntityRenderer(FullfudRegistries.SHAHED_LAUNCHER_ENTITY.get(), ShahedLauncherRenderer::new);
-        event.registerEntityRenderer(FullfudRegistries.FP5_FLAMINGO_ENTITY.get(), Fp5FlamingoRenderer::new);
-        event.registerEntityRenderer(FullfudRegistries.FP5_LAUNCHER_ENTITY.get(), Fp5LauncherRenderer::new);
-        event.registerEntityRenderer(FullfudRegistries.REB_EMITTER_ENTITY.get(), RebEmitterRenderer::new);
-    }
+        MenuScreens.register(FullfudRegistries.SHAHED_MONITOR_MENU.get(), ShahedMonitorScreen::new);
+        MenuScreens.register(FullfudRegistries.FP5_MONITOR_MENU.get(), Fp5MonitorScreen::new);
+        MenuScreens.register(FullfudRegistries.DRONE_SERVICE_MENU.get(), DroneServiceScreen::new);
 
-    public static void onRegisterKeyMappings(final RegisterKeyMappingsEvent event) {
-        event.register(POWER_UP);
-        event.register(POWER_DOWN);
+        ClientTickEvents.END_CLIENT_TICK.register(ShahedClientHandler::onClientTick);
+        WorldRenderEvents.AFTER_TRANSLUCENT.register(ShahedClientHandler::onAfterTranslucent);
     }
 
     public static void handleStatusPacket(final ShahedStatusPacket packet) {
@@ -206,7 +199,7 @@ public final class ShahedClientHandler {
         if (droneId == null) {
             return;
         }
-        FullfudNetwork.getChannel().sendToServer(new ShahedControlPacket(
+        FullfudClientNetwork.sendToServer(new ShahedControlPacket(
             droneId,
             forward,
             strafe,
@@ -227,19 +220,24 @@ public final class ShahedClientHandler {
         monitorCameraShakeYaw = 0.0F;
     }
 
-    private static void onComputeCameraAngles(final ViewportEvent.ComputeCameraAngles event) {
-        if (event.getCamera().getEntity() instanceof ShahedDroneEntity drone) {
-            event.setYaw(Mth.wrapDegrees(event.getYaw() + monitorCameraShakeYaw));
-            event.setRoll(drone.getVisualRoll((float) event.getPartialTick()));
-            event.setPitch(drone.getVisualPitch((float) event.getPartialTick()) + monitorCameraShakePitch);
+    /**
+     * Called from {@code GameRendererMixin} right after {@code Camera.setup}, where Forge fired
+     * {@code ViewportEvent.ComputeCameraAngles}. Roll and pitch come off the drone, so the monitor feed
+     * banks with it; the shake offsets are added on top.
+     */
+    public static void onComputeCameraAngles(final Camera camera, final float partialTick, final ViewportAngles angles) {
+        if (camera.getEntity() instanceof ShahedDroneEntity drone) {
+            angles.setYaw(Mth.wrapDegrees(angles.yaw() + monitorCameraShakeYaw));
+            angles.setRoll(drone.getVisualRoll(partialTick));
+            angles.setPitch(drone.getVisualPitch(partialTick) + monitorCameraShakePitch);
         }
     }
 
-    private static void onClientTick(final TickEvent.ClientTickEvent event) {
-        if (event.phase != TickEvent.Phase.END) {
-            return;
-        }
-        final Minecraft minecraft = Minecraft.getInstance();
+    /**
+     * Registered on {@code ClientTickEvents.END_CLIENT_TICK}, the end phase of Forge's
+     * {@code TickEvent.ClientTickEvent} this listener used to filter for by hand.
+     */
+    public static void onClientTick(final Minecraft minecraft) {
         if (minecraft == null) {
             return;
         }
@@ -536,7 +534,7 @@ public final class ShahedClientHandler {
         );
     }
 
-    private static void renderGhostShaheds(final RenderLevelStageEvent event, final Minecraft minecraft) {
+    private static void renderGhostShaheds(final PoseStack poseStack, final Camera camera, final float partialTick, final Minecraft minecraft) {
         if (!FullfudClientConfig.CLIENT.shahedGhostRenderEnabled.get()) {
             return;
         }
@@ -549,9 +547,7 @@ public final class ShahedClientHandler {
             return;
         }
         final double maxRangeSqr = ghostRenderRange * ghostRenderRange;
-        final var cameraPos = event.getCamera().getPosition();
-        final float partialTick = event.getPartialTick();
-        final PoseStack poseStack = event.getPoseStack();
+        final var cameraPos = camera.getPosition();
         final EntityRenderDispatcher dispatcher = minecraft.getEntityRenderDispatcher();
         final MultiBufferSource.BufferSource bufferSource = minecraft.renderBuffers().bufferSource();
         final Set<UUID> loadedShaheds = new HashSet<>();
@@ -599,7 +595,9 @@ public final class ShahedClientHandler {
             );
 
             final int ghostLight = resolveGhostRenderLight(minecraft, x, y, z);
-            dispatcher.render(ghost, dx, dy, dz, ghost.getYRot(), partialTick, poseStack, bufferSource, ghostLight);
+            // 1.21.2 dropped the yaw argument: body rotation is extracted into the render state now,
+            // and ShahedDroneRenderer applies its own yaw/roll wrapper regardless.
+            dispatcher.render(ghost, dx, dy, dz, partialTick, poseStack, bufferSource, ghostLight);
             renderedAny = true;
         }
 
@@ -615,7 +613,8 @@ public final class ShahedClientHandler {
         }
         ghost = new ShahedDroneEntity(FullfudRegistries.SHAHED_ENTITY.get(), minecraft.level);
         ghost.setUUID(droneId);
-        ghost.noCulling = true;
+        // Entity.noCulling is gone in 1.21.2. Ghosts never went through the frustum check anyway —
+        // renderGhostShaheds calls EntityRenderDispatcher.render directly — so nothing replaces it.
         GHOST_ENTITIES.put(droneId, ghost);
         return ghost;
     }
@@ -800,15 +799,24 @@ public final class ShahedClientHandler {
         }
     }
 
-    private static void onRenderLevelStage(final RenderLevelStageEvent event) {
-        if (event.getStage() != RenderLevelStageEvent.Stage.AFTER_TRANSLUCENT_BLOCKS) {
-            return;
-        }
+    /**
+     * Registered on {@code WorldRenderEvents.AFTER_TRANSLUCENT}, the closest counterpart to Forge's
+     * {@code RenderLevelStageEvent} stage {@code AFTER_TRANSLUCENT_BLOCKS} the listener filtered for. Both
+     * fire after the translucent layer with the camera-rotated, untranslated pose stack and no live vertex
+     * consumers, so the two draws below still batch and flush themselves. Fabric's runs a little later —
+     * after particles, before clouds and weather.
+     */
+    public static void onAfterTranslucent(final WorldRenderContext context) {
         final Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.player == null || minecraft.level == null) {
             return;
         }
-        renderGhostShaheds(event, minecraft);
+        final PoseStack poseStack = context.matrixStack();
+        final Camera camera = context.camera();
+        // fabric-rendering-v1 10.x swapped the raw float for a DeltaTracker; false asks for the
+        // paused-aware game-time delta, which is what a partial tick used to be.
+        final float partialTick = context.tickCounter().getGameTimeDeltaPartialTick(false);
+        renderGhostShaheds(poseStack, camera, partialTick, minecraft);
         if (!isHoldingBattery(minecraft.player)) {
             return;
         }
@@ -818,30 +826,32 @@ public final class ShahedClientHandler {
         if (!(entityHit.getEntity() instanceof RebEmitterEntity emitter) || emitter.isRemoved() || emitter.hasBattery()) {
             return;
         }
-        final PoseStack poseStack = event.getPoseStack();
         poseStack.pushPose();
-        final var cameraPos = event.getCamera().getPosition();
+        final var cameraPos = camera.getPosition();
         poseStack.translate(emitter.getX() - cameraPos.x, emitter.getY() - cameraPos.y, emitter.getZ() - cameraPos.z);
         RenderSystem.enableBlend();
         RenderSystem.defaultBlendFunc();
         RenderSystem.disableDepthTest();
-        RenderSystem.setShader(GameRenderer::getPositionColorShader);
-        final BufferBuilder builder = Tesselator.getInstance().getBuilder();
+        RenderSystem.setShader(CoreShaders.POSITION_COLOR);
+        final BufferBuilder builder = Tesselator.getInstance().begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
         final float half = 0.25F;
         final float y = 0.5F;
-        builder.begin(VertexFormat.Mode.QUADS, DefaultVertexFormat.POSITION_COLOR);
-        builder.vertex(poseStack.last().pose(), -half, y, -half).color(32, 255, 96, 160).endVertex();
-        builder.vertex(poseStack.last().pose(), half, y, -half).color(32, 255, 96, 160).endVertex();
-        builder.vertex(poseStack.last().pose(), half, y, half).color(32, 255, 96, 160).endVertex();
-        builder.vertex(poseStack.last().pose(), -half, y, half).color(32, 255, 96, 160).endVertex();
-        final RenderedBuffer renderedBuffer = builder.end();
-        BufferUploader.drawWithShader(renderedBuffer);
+        final Matrix4f pose = poseStack.last().pose();
+        builder.addVertex(pose, -half, y, -half).setColor(32, 255, 96, 160);
+        builder.addVertex(pose, half, y, -half).setColor(32, 255, 96, 160);
+        builder.addVertex(pose, half, y, half).setColor(32, 255, 96, 160);
+        builder.addVertex(pose, -half, y, half).setColor(32, 255, 96, 160);
+        BufferUploader.drawWithShader(builder.buildOrThrow());
         RenderSystem.enableDepthTest();
         RenderSystem.disableBlend();
         poseStack.popPose();
     }
 
-    private static void onRenderGui(final RenderGuiEvent.Post event) {
+    /**
+     * Called from {@code GuiMixin}, in place of the former {@code RenderGuiEvent.Post} listener: the REB
+     * emitter status readout under the crosshair.
+     */
+    public static void onRenderGui(final GuiGraphics graphics) {
         final Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.player == null || minecraft.level == null) {
             return;
@@ -857,12 +867,16 @@ public final class ShahedClientHandler {
         }
         final Component statusText = resolveEmitterStatus(emitter);
         final Component chargeText = resolveEmitterCharge(emitter);
-        final GuiGraphics graphics = event.getGuiGraphics();
+        // Third line: which mode the dish is in. Without it the only way to tell DETECT from JAM was to
+        // remember the chat line from the last screwdriver click.
+        final Component modeText = Component.translatable(emitter.getMode() == RebEmitterEntity.Mode.JAM
+            ? "status.fullfud.reb.mode_jam"
+            : "status.fullfud.reb.mode_detect");
         final Font font = minecraft.font;
         final int padding = 6;
         final int spacing = 2;
-        final int width = Math.max(font.width(statusText), font.width(chargeText)) + padding * 2;
-        final int height = font.lineHeight * 2 + spacing + padding * 2;
+        final int width = Math.max(font.width(statusText), Math.max(font.width(chargeText), font.width(modeText))) + padding * 2;
+        final int height = font.lineHeight * 3 + spacing * 2 + padding * 2;
         final int screenWidth = minecraft.getWindow().getGuiScaledWidth();
         final int screenHeight = minecraft.getWindow().getGuiScaledHeight();
         final int x = (screenWidth - width) / 2;
@@ -870,34 +884,35 @@ public final class ShahedClientHandler {
         graphics.fill(x, y, x + width, y + height, 0x88000000);
         graphics.drawString(font, statusText, x + padding, y + padding, 0xFFFFFFFF, false);
         graphics.drawString(font, chargeText, x + padding, y + padding + font.lineHeight + spacing, 0xFFB0B0B0, false);
+        graphics.drawString(font, modeText, x + padding, y + padding + (font.lineHeight + spacing) * 2,
+            emitter.getMode() == RebEmitterEntity.Mode.JAM ? 0xFFFFA030 : 0xFF60D0FF, false);
     }
 
-    private static void onRenderHand(final RenderHandEvent event) {
+    /** Asked by {@code ItemInHandRendererMixin}, in place of cancelling {@code RenderHandEvent}. */
+    public static boolean shouldHideHand() {
         final Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.player == null) {
-            return;
+            return false;
         }
-        if (!isOwnerShahedSessionActive(minecraft)) {
-            return;
-        }
-        event.setCanceled(true);
+        return isOwnerShahedSessionActive(minecraft);
     }
 
-    private static void onPlayLevelSoundAtEntity(final PlayLevelSoundEvent.AtEntity event) {
+    /**
+     * Asked by {@code LevelSoundMixin}, in place of cancelling {@code PlayLevelSoundEvent.AtEntity}.
+     * Silences the operator's own body while they are watching a monitor feed.
+     */
+    public static boolean shouldCancelEntitySound(final Entity entity, final SoundSource source) {
         final Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.player == null || event == null || event.getEntity() == null) {
-            return;
+        if (minecraft == null || minecraft.player == null || entity == null) {
+            return false;
         }
-        if (!isLocalOwnerEntity(minecraft, event.getEntity())) {
-            return;
+        if (!isLocalOwnerEntity(minecraft, entity)) {
+            return false;
         }
         if (!isOwnerShahedSessionActive(minecraft)) {
-            return;
+            return false;
         }
-        if (event.getSource() != SoundSource.PLAYERS) {
-            return;
-        }
-        event.setCanceled(true);
+        return source == SoundSource.PLAYERS;
     }
 
     private static boolean isHoldingBattery(final Player player) {

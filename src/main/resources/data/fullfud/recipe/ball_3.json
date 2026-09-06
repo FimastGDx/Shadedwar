@@ -1,0 +1,14 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "fullfud:ball_2",
+    "fullfud:ball_2",
+    "fullfud:synth_powder",
+    "minecraft:gunpowder",
+    "fullfud:insert_steel"
+  ],
+  "result": {
+    "id": "fullfud:ball_3",
+    "count": 1
+  }
+}

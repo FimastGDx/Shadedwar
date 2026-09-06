@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:root",
+  "criteria": {
+    "screwdriver": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "fullfud:screwdriver"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:screwdriver"
+    },
+    "title": {
+      "translate": "advancements.fullfud.screwdriver.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.screwdriver.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "screwdriver"
+    ]
+  ]
+}

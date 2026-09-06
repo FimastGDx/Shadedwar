@@ -2,9 +2,12 @@ package com.fullfud.fullfud.common.menu;
 
 import com.fullfud.fullfud.common.entity.ShahedDroneEntity;
 import com.fullfud.fullfud.core.FullfudRegistries;
-import net.minecraft.network.FriendlyByteBuf;
+import com.fullfud.fullfud.core.data.PersistentData;
+import net.minecraft.core.UUIDUtil;
 import net.minecraft.nbt.CompoundTag;
 import net.minecraft.nbt.Tag;
+import net.minecraft.network.codec.ByteBufCodecs;
+import net.minecraft.network.codec.StreamCodec;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.server.level.ServerPlayer;
 import net.minecraft.world.entity.player.Inventory;
@@ -16,11 +19,20 @@ import java.util.Optional;
 import java.util.UUID;
 
 public class ShahedMonitorMenu extends AbstractContainerMenu {
+    /** Screen-opening payload; replaces the hand-rolled {@code FriendlyByteBuf} reads of the Forge version. */
+    public record Data(UUID droneId, int droneEntityId) {
+        public static final StreamCodec<io.netty.buffer.ByteBuf, Data> STREAM_CODEC = StreamCodec.composite(
+            UUIDUtil.STREAM_CODEC, Data::droneId,
+            ByteBufCodecs.VAR_INT, Data::droneEntityId,
+            Data::new
+        );
+    }
+
     private final UUID droneId;
     private final int droneEntityId;
 
-    public ShahedMonitorMenu(final int containerId, final Inventory inventory, final FriendlyByteBuf buffer) {
-        this(containerId, inventory, readDroneUuid(buffer), readDroneEntityId(buffer));
+    public ShahedMonitorMenu(final int containerId, final Inventory inventory, final Data data) {
+        this(containerId, inventory, data == null ? null : data.droneId(), data == null ? -1 : data.droneEntityId());
     }
 
     public ShahedMonitorMenu(final int containerId, final Inventory inventory, final UUID droneId, final int droneEntityId) {
@@ -67,7 +79,7 @@ public class ShahedMonitorMenu extends AbstractContainerMenu {
             return;
         }
 
-        final CompoundTag root = serverPlayer.getPersistentData();
+        final CompoundTag root = PersistentData.of(serverPlayer);
         if (root.contains(ShahedDroneEntity.PLAYER_REMOTE_TAG, Tag.TAG_COMPOUND)) {
             final CompoundTag tag = root.getCompound(ShahedDroneEntity.PLAYER_REMOTE_TAG);
             ShahedDroneEntity.forceRestoreFromPersistentData(serverPlayer, tag);
@@ -94,19 +106,5 @@ public class ShahedMonitorMenu extends AbstractContainerMenu {
             }
         }
         return Optional.empty();
-    }
-
-    private static UUID readDroneUuid(final FriendlyByteBuf buffer) {
-        if (buffer == null || buffer.readableBytes() < 16) {
-            return null;
-        }
-        return buffer.readUUID();
-    }
-
-    private static int readDroneEntityId(final FriendlyByteBuf buffer) {
-        if (buffer == null || buffer.readableBytes() < 4) {
-            return -1;
-        }
-        return buffer.readInt();
     }
 }

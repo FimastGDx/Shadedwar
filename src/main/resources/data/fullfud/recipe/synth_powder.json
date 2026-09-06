@@ -1,0 +1,13 @@
+{
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "minecraft:gunpowder",
+    "minecraft:gunpowder",
+    "minecraft:coal",
+    "minecraft:redstone"
+  ],
+  "result": {
+    "id": "fullfud:synth_powder",
+    "count": 2
+  }
+}

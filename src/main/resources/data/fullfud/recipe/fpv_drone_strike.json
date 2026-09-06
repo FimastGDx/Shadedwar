@@ -1,0 +1,19 @@
+{
+  "type": "minecraft:crafting_shaped",
+  "pattern": [
+    "PPP",
+    "PDP",
+    "IWI"
+  ],
+  "key": {
+    "P": "fullfud:insert_steel",
+    "D": "fullfud:fpv_drone",
+    "I": "fullfud:ingot_steel",
+    "W": "fullfud:wire_copper_new"
+  },
+  "result": {
+    "id": "fullfud:fpv_drone_strike",
+    "count": 1
+  },
+  "group": "fullfud_fpv_drone"
+}

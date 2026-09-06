@@ -1,0 +1,34 @@
+{
+  "parent": "fullfud:first_drone",
+  "criteria": {
+    "cargo_drones": {
+      "trigger": "minecraft:inventory_changed",
+      "conditions": {
+        "items": [
+          {
+            "items": "#fullfud:cargo_drones"
+          }
+        ]
+      }
+    }
+  },
+  "display": {
+    "icon": {
+      "count": 1,
+      "id": "fullfud:fpv_drone_cargo"
+    },
+    "title": {
+      "translate": "advancements.fullfud.cargo.title"
+    },
+    "description": {
+      "translate": "advancements.fullfud.cargo.description"
+    },
+    "show_toast": true,
+    "announce_to_chat": true
+  },
+  "requirements": [
+    [
+      "cargo_drones"
+    ]
+  ]
+}
