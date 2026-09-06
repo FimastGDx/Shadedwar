@@ -224,6 +224,7 @@
   "message.fullfud.fpv.other_dimension": "The linked FPV drone is in another dimension.",
   "message.fullfud.fpv.loading_drone": "Loading the chunks around the drone...",
   "message.fullfud.fpv.recall_failed": "Could not reach the drone. Try again.",
+  "message.fullfud.fpv.control_timeout": "Signal lost: control timed out.",
   "tag.item.fullfud.fpv_drones": "FPV Drones",
   "tag.item.fullfud.cargo_drones": "Cargo FPV Drones",
   "tag.item.fullfud.shaheds": "Shahed-136",

@@ -2,8 +2,6 @@
   "type": "minecraft:crafting_shapeless",
   "ingredients": [
     "minecraft:iron_ingot",
-    "minecraft:iron_ingot",
-    "minecraft:coal",
     "minecraft:coal"
   ],
   "result": {

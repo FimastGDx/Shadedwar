@@ -1612,9 +1612,8 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     }
 
     private boolean canServiceFrom(final Player player) {
-        return isAlive()
-            && (ownerUUID == null || ownerUUID.equals(player.getUUID()))
-            && player.distanceToSqr(this) <= SERVICE_REACH_SQR;
+        // No owner check, matching the FPV bay: the launcher crew is whoever is standing there.
+        return isAlive() && player.distanceToSqr(this) <= SERVICE_REACH_SQR;
     }
 
     /**

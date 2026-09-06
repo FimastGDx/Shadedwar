@@ -1,15 +1,11 @@
 {
-  "type": "minecraft:crafting_shaped",
-  "pattern": [
-    "PBP",
-    "BIB",
-    "PBP"
+  "type": "minecraft:crafting_shapeless",
+  "ingredients": [
+    "fullfud:ball_1",
+    "fullfud:ball_1",
+    "fullfud:synth_powder",
+    "minecraft:gunpowder"
   ],
-  "key": {
-    "P": "fullfud:synth_powder",
-    "B": "fullfud:ball_1",
-    "I": "fullfud:insert_steel"
-  },
   "result": {
     "id": "fullfud:ball_2",
     "count": 1

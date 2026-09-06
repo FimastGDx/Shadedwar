@@ -224,6 +224,7 @@
   "message.fullfud.fpv.other_dimension": "Привязанный FPV-дронъ находится въ другомъ измѣреніи.",
   "message.fullfud.fpv.loading_drone": "Загрузка чанковъ вокругъ дрона...",
   "message.fullfud.fpv.recall_failed": "Не удалось выйти на связь съ дрономъ. Попробуйте ещё разъ.",
+  "message.fullfud.fpv.control_timeout": "Сигналъ потерянъ: управленіе прервано.",
   "tag.item.fullfud.fpv_drones": "FPV-дроны",
   "tag.item.fullfud.cargo_drones": "Грузовые FPV-дроны",
   "tag.item.fullfud.shaheds": "Шахеды-136",

@@ -127,7 +127,24 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     
     private static final int FPV_CHUNK_RADIUS = 3;
     private static final int MAX_FPV_CHUNK_TICKET_RADIUS = 8;
-    private static final int CONTROL_TIMEOUT_TICKS = 40;
+    /**
+     * Steady-state keep-alive: how long the session survives without an accepted {@code FpvControlPacket}.
+     *
+     * <p>Every accepted packet resets the counter to this, so in normal flight it never comes close to
+     * expiring. The only things that stop the packets are client-side stalls — chunk generation while
+     * flying fast at long range, a GC pause — and 40 ticks (the old value, two seconds) was inside the
+     * range a weak client genuinely produces, which read as being dumped out of the camera mid-flight.
+     * A hung <em>but connected</em> pilot is the only case this timeout catches: a disconnect is noticed
+     * the same tick by {@code getController() == null}.
+     */
+    private static final int CONTROL_TIMEOUT_TICKS = 100;
+    /**
+     * Grace after {@code beginControl}: the client cannot send its first control packet until the drone
+     * entity has streamed into its level, which needs the chunks around the viewpoint to arrive first.
+     * On a slow client that hand-off takes longer than the steady-state timeout, and the session used to
+     * die right after take-over — the "camera snaps back to the player" report on remote entry.
+     */
+    private static final int CONTROL_HANDOFF_TICKS = 400;
     private static final int SIGNAL_CALC_INTERVAL_TICKS = 2;
     private static final int MAX_OCCLUSION_STEPS = 256;
     private static final double REMOTE_PROTECTION_RADIUS = 16.0D;
@@ -326,7 +343,9 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
     }
 
     private boolean canServiceFrom(final Player player) {
-        return isAlive() && canAccess(player) && player.distanceToSqr(this) <= SERVICE_REACH_SQR;
+        // No owner check, matching interact: the bay has to be openable by whoever the drone was
+        // delivered to, not only the pilot who placed it.
+        return isAlive() && player.distanceToSqr(this) <= SERVICE_REACH_SQR;
     }
 
     /**
@@ -537,6 +556,9 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
                 if (controlTimeoutTicks > 0) {
                     controlTimeoutTicks--;
                 } else {
+                    // The one kick the pilot can actually see coming: everything else (Esc, release
+                    // packet, goggles off, disconnect) is either their own doing or handled elsewhere.
+                    controller.displayClientMessage(Component.translatable("message.fullfud.fpv.control_timeout"), true);
                     endRemoteControl(controller);
                     controller = null;
                 }
@@ -1133,14 +1155,17 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
         if (level().isClientSide()) {
             return InteractionResult.SUCCESS;
         }
-        if (!canAccess(player)) {
-            return InteractionResult.FAIL;
-        }
+        // The service bay is deliberately outside canAccess: a drone handed to another player — cargo
+        // delivery being the whole point of that — has to be unloadable by whoever it lands in front
+        // of, even though the owner tag still names the pilot who placed it.
         if (held.getItem() instanceof ScrewdriverItem) {
             if (player instanceof ServerPlayer serverPlayer) {
                 DroneServiceMenu.open(serverPlayer, this, getServiceBay(), true);
             }
             return InteractionResult.CONSUME;
+        }
+        if (!canAccess(player)) {
+            return InteractionResult.FAIL;
         }
         if (held.getItem() instanceof FpvConfiguratorItem) {
             if (player instanceof ServerPlayer serverPlayer) {
@@ -1571,7 +1596,10 @@ public class FpvDroneEntity extends Entity implements GeoEntity {
             return false;
         }
         entityData.set(DATA_CONTROLLER, Optional.of(player.getUUID()));
-        controlTimeoutTicks = CONTROL_TIMEOUT_TICKS;
+        // The hand-off grace, not the steady value: the client gets the drone entity only after the
+        // chunks around it have streamed in, and that is exactly the window this timeout would otherwise
+        // close. The first accepted control packet brings it down to the steady-state value.
+        controlTimeoutTicks = CONTROL_HANDOFF_TICKS;
         session = new ControlSession(player.level().dimension(), player.position(), player.getYRot(), player.getXRot(), player.gameMode.getGameModeForPlayer());
         syncRemoteActiveState();
         writeRemoteTag(player);
