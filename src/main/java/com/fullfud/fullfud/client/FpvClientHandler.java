@@ -177,7 +177,6 @@ public final class FpvClientHandler {
     private static final ControllerCalibration controllerCalibration = new ControllerCalibration();
     private static boolean lastControllerPresent = false;
     private static boolean localPlayerSilent;
-    private static boolean localPlayerNoGravity;
 
     private FpvClientHandler() {
     }
@@ -1594,7 +1593,6 @@ public final class FpvClientHandler {
         }
         if (!localPlayerStateCaptured) {
             localPlayerSilent = player.isSilent();
-            localPlayerNoGravity = player.isNoGravity();
             localPlayerStateCaptured = true;
         }
         player.setSilent(true);
@@ -1618,7 +1616,12 @@ public final class FpvClientHandler {
             return;
         }
         minecraft.player.setSilent(localPlayerSilent);
-        minecraft.player.setNoGravity(localPlayerNoGravity);
+        // Not the captured value: the server parks the pilot body with setNoGravity(true) too
+        // (RemoteControlFailsafe#holdPilotBody) and no-gravity is synced entity data, so what we captured
+        // on the first tick may already be the server's session flag. Replaying it left the local player
+        // levitating with nothing to ever clear the flag. The server's own restore clears it
+        // unconditionally, so match that instead.
+        minecraft.player.setNoGravity(false);
         localPlayerStateCaptured = false;
     }
 }
