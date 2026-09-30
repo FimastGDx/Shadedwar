@@ -7,6 +7,7 @@ import com.fullfud.fullfud.common.entity.drone.FpvDroneConfig;
 import com.fullfud.fullfud.core.network.packet.DroneAudioLoopPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioOneShotPacket;
 import com.fullfud.fullfud.core.network.packet.OpenFpvConfiguratorPacket;
+import com.fullfud.fullfud.core.network.packet.OpenShahedAutopilotPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedGhostUpdatePacket;
 import com.fullfud.fullfud.core.network.packet.ShahedLinkPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedStatusPacket;
@@ -46,6 +47,8 @@ public final class FullfudClientNetwork {
         ClientPlayNetworking.registerGlobalReceiver(OpenFpvConfiguratorPacket.TYPE,
             (packet, context) -> FpvClientHandler.openConfigurator(
                 packet.droneId(), FpvDroneConfig.fromTag(packet.configTag())));
+        ClientPlayNetworking.registerGlobalReceiver(OpenShahedAutopilotPacket.TYPE,
+            (packet, context) -> ShahedClientHandler.openAutopilot(packet.droneId(), packet.settingsTag()));
         ClientPlayNetworking.registerGlobalReceiver(DroneAudioLoopPacket.TYPE,
             (packet, context) -> DroneAudioClientHandler.handleLoop(packet));
         ClientPlayNetworking.registerGlobalReceiver(DroneAudioOneShotPacket.TYPE,

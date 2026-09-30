@@ -9,7 +9,9 @@ import com.fullfud.fullfud.common.entity.RebEmitterEntity;
 import com.fullfud.fullfud.common.entity.ShahedDroneEntity;
 import com.fullfud.fullfud.common.menu.ShahedMonitorMenu;
 import com.fullfud.fullfud.core.config.FullfudClientConfig;
+import com.fullfud.fullfud.core.network.FullfudClientNetwork;
 import com.fullfud.fullfud.core.network.packet.ShahedStatusPacket;
+import com.fullfud.fullfud.core.network.packet.ToggleShahedAutopilotPacket;
 import com.mojang.blaze3d.platform.Lighting;
 import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
@@ -56,6 +58,17 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
      * noise reading and any jammer in range — rather than deriving a second, disagreeing one.
      */
     private float lastDisplayNoise;
+
+    /**
+     * When the feed dies (Shahed crash/detonation, hard jam, or the signal simply dropping out) we no longer
+     * cut straight back to the player's eyes. For this many ticks the monitor keeps rendering full static with
+     * the NO SIGNAL caption, then closes. 60 ticks = 3 s.
+     */
+    private static final int SIGNAL_LOST_GRACE_TICKS = 60;
+    /** Countdown while showing the post-signal-loss static; {@code -1} when not in the grace window. */
+    private int signalLostGraceTicks = -1;
+    /** True once a live camera feed has existed, so a monitor that never connects still closes at once. */
+    private boolean hadLiveFeed;
 
     private int controlTicker;
     private Entity previousCamera;
@@ -113,16 +126,37 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
     @Override
     protected void containerTick() {
         super.containerTick();
-        final ShahedStatusPacket status = ShahedClientHandler.getLastStatus();
-        final boolean fresh = ShahedClientHandler.hasFreshStatus(FullfudClientConfig.CLIENT.shahedStatusFreshnessMs.get());
-        if (status == null || !fresh || status.signalLost()) {
-            restoreCamera();
-            if (this.minecraft != null) this.minecraft.setScreen(null);
+
+        // Post-signal-loss static window: the camera is already back on the player, we just hold the screen
+        // open painting full static + NO SIGNAL until the countdown runs out, then close.
+        if (signalLostGraceTicks >= 0) {
+            if (--signalLostGraceTicks < 0 && this.minecraft != null) {
+                this.minecraft.setScreen(null);
+            }
             return;
         }
+
+        final ShahedStatusPacket status = ShahedClientHandler.getLastStatus();
+        final boolean fresh = ShahedClientHandler.hasFreshStatus(FullfudClientConfig.CLIENT.shahedStatusFreshnessMs.get());
+        // Drone destruction is handled by ShahedClientHandler's HUD static, because the server force-closes this
+        // menu (stillValid goes false) the instant the drone is discarded — the screen is gone before it could
+        // paint. Here we only cover the cases where the drone is still alive but the picture drops: a hard jam,
+        // a stale feed, or an out-of-range signal loss, where the menu stays open.
+        if (status == null || !fresh || status.signalLost()) {
+            if (hadLiveFeed) {
+                // We had a picture and just lost it (hard jam, signal drop): flash static for a moment before
+                // dropping the pilot back to their own view instead of a hard cut.
+                beginSignalLostGrace();
+            } else {
+                restoreCamera();
+                if (this.minecraft != null) this.minecraft.setScreen(null);
+            }
+            return;
+        }
+        hadLiveFeed = true;
         ensureCamera();
         updateJammerOverlay();
-        
+
         applyCameraShake(status);
 
         final int controlInterval = Math.max(1, FullfudClientConfig.CLIENT.shahedMonitorControlIntervalTicks.get());
@@ -130,6 +164,19 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
             controlTicker = 0;
             sendControlInput();
         }
+    }
+
+    /**
+     * Enters the signal-loss grace window: restore the camera to the player right away (the drone is almost
+     * certainly gone), stop the shake, and keep the screen open so {@link #drawFullPanel} can paint forced
+     * static over the player's view until {@link #containerTick} closes it.
+     */
+    private void beginSignalLostGrace() {
+        if (signalLostGraceTicks < 0) {
+            signalLostGraceTicks = SIGNAL_LOST_GRACE_TICKS;
+        }
+        ShahedClientHandler.clearMonitorCameraShake();
+        restoreCamera();
     }
     
     private void applyCameraShake(ShahedStatusPacket status) {
@@ -256,14 +303,21 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
         float noiseOpacity = status != null ? status.noiseLevel() : 0.0F;
         noiseOpacity = Math.max(noiseOpacity, computeNoiseOpacityByDistance(distance));
         noiseOpacity = Math.max(noiseOpacity, jammerNoiseOverride);
-        final float displayNoise = toDisplayNoise(noiseOpacity);
+        float displayNoise = toDisplayNoise(noiseOpacity);
+        // During the signal-loss grace window the feed is gone, so pin the picture to full static regardless
+        // of whatever stale telemetry is left behind.
+        if (signalLostGraceTicks >= 0) {
+            displayNoise = 1.0F;
+        }
         lastDisplayNoise = displayNoise;
 
         if (displayNoise > 0.0F) {
             renderTvNoise(graphics, monitorX, monitorY, monitorWidth, monitorHeight, displayNoise);
         }
 
-        if (!liveSignal) {
+        if (signalLostGraceTicks >= 0) {
+            drawBigNoSignal(graphics);
+        } else if (!liveSignal) {
             graphics.drawString(
                 font,
                 Component.translatable("screen.fullfud.monitor.no_signal"),
@@ -273,6 +327,19 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
                 false
             );
         }
+    }
+
+    /** Large, centred, white NO SIGNAL caption shown over the static during the signal-loss grace window. */
+    private void drawBigNoSignal(final GuiGraphics graphics) {
+        final Component text = Component.literal("NO SIGNAL");
+        final float scale = 3.0F;
+        final int textWidth = font.width(text);
+        final PoseStack pose = graphics.pose();
+        pose.pushPose();
+        pose.translate(width / 2.0F, height / 2.0F, 0.0F);
+        pose.scale(scale, scale, 1.0F);
+        graphics.drawString(font, text, -textWidth / 2, -font.lineHeight / 2, 0xFFFFFFFF, true);
+        pose.popPose();
     }
 
     private void renderTvNoise(final GuiGraphics graphics, final int x, final int y, final int width, final int height, final float opacity) {
@@ -460,6 +527,13 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
 
         if (status.signalLost()) {
             graphics.drawString(font, Component.translatable("message.fullfud.monitor.turn"), width / 2 - 70, height / 2, 0xFFFF5555, false);
+        }
+
+        final ShahedDroneEntity autoDrone = drone != null ? drone : resolveDrone();
+        if (autoDrone != null && autoDrone.isAutoModeActive()) {
+            final Component autoBanner = Component.translatable("hud.fullfud.shahed.auto_mode");
+            final int bannerWidth = font.width(autoBanner);
+            graphics.drawString(font, autoBanner, width / 2 - bannerWidth / 2, height / 2 - 40, 0xFFFFB000, false);
         }
 
         drawWarnings(graphics, status, partialTick);
@@ -763,6 +837,12 @@ public class ShahedMonitorScreen extends AbstractContainerScreen<ShahedMonitorMe
     @Override
     public boolean keyPressed(final int keyCode, final int scanCode, final int modifiers) {
         if (minecraft != null && minecraft.options.keyTogglePerspective.matches(keyCode, scanCode)) {
+            return true;
+        }
+        // V flips the autopilot on/off in flight. Hardcoded to GLFW_KEY_V rather than a KeyMapping so it can't
+        // clobber the FPV arm binding (also V) in KeyMapping.KEY_MAP; the server re-gates on control authority.
+        if (keyCode == GLFW.GLFW_KEY_V && menu.getDroneId() != null) {
+            FullfudClientNetwork.sendToServer(new ToggleShahedAutopilotPacket(menu.getDroneId()));
             return true;
         }
         if (handleKeyChange(keyCode, scanCode, true)) {

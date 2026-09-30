@@ -9,17 +9,17 @@ package com.fullfud.fullfud.common.entity.drone;
  *
  * <p>{@code power} is the vanilla explosion radius parameter, not a TNT count. TNT is 4.0, and the
  * volume an explosion clears grows with the cube of that number, so "as much as N sticks of TNT" is
- * {@code 4 * cbrt(N)}: two sticks is 5.0, five is 6.8, ten is 8.6. Reading the tiers as TNT counts
+ * {@code 4 * cbrt(N)}: three sticks is 5.8, seven is 7.7, ten is 8.6. Reading the tiers as TNT counts
  * directly would have made tier 4 a 40-block crater.
  */
 public enum WarheadCharge {
     NONE(0, 0.0F, false),
     /** Roughly one stick of TNT. */
     TIER_1(1, 4.0F, false),
-    /** Roughly two sticks. The heaviest an FPV airframe will take. */
-    TIER_2(2, 5.0F, false),
-    /** Roughly five sticks. */
-    TIER_3(3, 6.8F, false),
+    /** Roughly three sticks. The heaviest an FPV airframe will take. */
+    TIER_2(2, 5.8F, false),
+    /** Roughly seven sticks. */
+    TIER_3(3, 7.7F, false),
     /** Roughly ten sticks, and it starts fires. */
     TIER_4(4, 8.6F, true);
 

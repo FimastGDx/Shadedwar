@@ -13,6 +13,7 @@ import com.fullfud.fullfud.client.sound.ShahedDiveLoopSoundInstance;
 import com.fullfud.fullfud.client.sound.ShahedEngineLoopSoundInstance;
 import com.fullfud.fullfud.common.entity.RebEmitterEntity;
 import com.fullfud.fullfud.common.entity.ShahedDroneEntity;
+import com.fullfud.fullfud.common.menu.ShahedMonitorMenu;
 import com.fullfud.fullfud.common.item.MonitorItem;
 import com.fullfud.fullfud.common.item.RebBatteryItem;
 import com.fullfud.fullfud.core.FullfudRegistries;
@@ -33,17 +34,23 @@ import com.mojang.blaze3d.vertex.VertexFormat;
 import net.minecraft.client.Camera;
 import net.minecraft.client.KeyMapping;
 import net.minecraft.client.Minecraft;
+import com.fullfud.fullfud.client.screen.ShahedAutopilotScreen;
+import net.minecraft.nbt.CompoundTag;
 import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.MenuScreens;
 import net.minecraft.client.renderer.CoreShaders;
 import net.minecraft.client.renderer.LightTexture;
 import net.minecraft.client.renderer.MultiBufferSource;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.EntityRenderDispatcher;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.core.BlockPos;
 import net.minecraft.network.chat.Component;
+import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundEvent;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.Entity;
 import net.minecraft.world.entity.player.Player;
@@ -94,6 +101,23 @@ public final class ShahedClientHandler {
     private static boolean localPlayerSilent;
     private static float monitorCameraShakePitch;
     private static float monitorCameraShakeYaw;
+
+    /**
+     * Post-detonation static, owned here rather than by {@link ShahedMonitorScreen} because the server force-closes
+     * the monitor menu the instant the drone is discarded ({@code ShahedMonitorMenu.stillValid} goes false), which
+     * tears the screen down before it can paint anything. This HUD path outlives the screen: while the pilot has a
+     * live feed we remember the drone, and when it is destroyed we hold {@value #SIGNAL_LOST_GRACE_TICKS} ticks of
+     * full-screen noise + NO SIGNAL over the player's own view instead of cutting straight back.
+     */
+    private static final int SIGNAL_LOST_GRACE_TICKS = 60;
+    private static int signalLostGraceTicks = -1;
+    private static UUID pilotedDroneId;
+    private static boolean hadMonitorFeed;
+    private static final ResourceLocation SIGNAL_LOST_NOISE_ID =
+        ResourceLocation.fromNamespaceAndPath("fullfud", "shahed_signal_lost_noise");
+    private static DynamicTexture signalLostNoiseTexture;
+    private static int signalLostNoiseWidth = -1;
+    private static int signalLostNoiseHeight = -1;
 
     private ShahedClientHandler() {
     }
@@ -151,6 +175,15 @@ public final class ShahedClientHandler {
             existing.update(packet, nowTick);
             return existing;
         });
+    }
+
+    /** Opens the autopilot configurator screen, seeded with the drone's current settings from the server. */
+    public static void openAutopilot(final UUID droneId, final CompoundTag settings) {
+        final Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null || droneId == null) {
+            return;
+        }
+        minecraft.setScreen(new ShahedAutopilotScreen(droneId, settings));
     }
 
     public static void handleLinkPacket(final ShahedLinkPacket packet) {
@@ -241,6 +274,7 @@ public final class ShahedClientHandler {
         if (minecraft == null) {
             return;
         }
+        updateSignalLossStatic(minecraft);
         if (!(minecraft.screen instanceof ShahedMonitorScreen)) {
             clearMonitorCameraShake();
         }
@@ -273,6 +307,138 @@ public final class ShahedClientHandler {
         }
         ENGINE_AUDIO.entrySet().removeIf(entry -> entry.getValue().shouldRemove());
         updateGhostState(minecraft);
+    }
+
+    /**
+     * Tracks the monitor feed and, when the drone the pilot was watching is destroyed, opens the post-detonation
+     * static window. Runs before everything else in the tick so the countdown keeps advancing even after the
+     * monitor menu is torn down. Closing the monitor while the drone is still flying just forgets it — no static.
+     */
+    private static void updateSignalLossStatic(final Minecraft minecraft) {
+        if (minecraft.level == null || minecraft.player == null) {
+            signalLostGraceTicks = -1;
+            pilotedDroneId = null;
+            hadMonitorFeed = false;
+            return;
+        }
+        if (signalLostGraceTicks >= 0) {
+            if (--signalLostGraceTicks < 0) {
+                pilotedDroneId = null;
+                hadMonitorFeed = false;
+            }
+            return;
+        }
+
+        final boolean monitorOpen = minecraft.screen instanceof ShahedMonitorScreen;
+        final boolean fresh = hasFreshStatus(FullfudClientConfig.CLIENT.shahedStatusFreshnessMs.get());
+        if (monitorOpen && fresh) {
+            final ShahedDroneEntity drone = resolvePilotedDrone(minecraft);
+            if (drone != null && !drone.isRemoved() && drone.isAlive()) {
+                pilotedDroneId = drone.getUUID();
+                hadMonitorFeed = true;
+                return;
+            }
+        }
+
+        if (hadMonitorFeed && pilotedDroneId != null) {
+            final ShahedDroneEntity drone = findDroneById(minecraft, pilotedDroneId);
+            final boolean droneGone = drone == null || drone.isRemoved() || !drone.isAlive();
+            if (droneGone) {
+                // Crash/detonation: hold static over the player's view for a moment before the hard cut.
+                signalLostGraceTicks = SIGNAL_LOST_GRACE_TICKS;
+            } else if (!monitorOpen) {
+                // Pilot simply closed the monitor with the drone still airborne.
+                pilotedDroneId = null;
+                hadMonitorFeed = false;
+            }
+        }
+    }
+
+    private static ShahedDroneEntity resolvePilotedDrone(final Minecraft minecraft) {
+        if (minecraft.player != null && minecraft.player.containerMenu instanceof ShahedMonitorMenu menu) {
+            if (menu.getDroneEntityId() > 0
+                && minecraft.level.getEntity(menu.getDroneEntityId()) instanceof ShahedDroneEntity byId) {
+                return byId;
+            }
+            if (menu.getDroneId() != null) {
+                final ShahedDroneEntity byUuid = findDroneById(minecraft, menu.getDroneId());
+                if (byUuid != null) {
+                    return byUuid;
+                }
+            }
+        }
+        if (minecraft.getCameraEntity() instanceof ShahedDroneEntity camera) {
+            return camera;
+        }
+        return null;
+    }
+
+    private static ShahedDroneEntity findDroneById(final Minecraft minecraft, final UUID id) {
+        if (minecraft.level == null || id == null) {
+            return null;
+        }
+        for (final Entity entity : minecraft.level.entitiesForRendering()) {
+            if (entity instanceof ShahedDroneEntity drone && id.equals(drone.getUUID())) {
+                return drone;
+            }
+        }
+        return null;
+    }
+
+    /** Full-screen white noise plus a large white NO SIGNAL caption, painted during the signal-loss window. */
+    private static void drawSignalLostStatic(final GuiGraphics graphics, final Minecraft minecraft) {
+        final int width = minecraft.getWindow().getGuiScaledWidth();
+        final int height = minecraft.getWindow().getGuiScaledHeight();
+        renderSignalLostNoise(graphics, minecraft, width, height);
+
+        final Font font = minecraft.font;
+        final Component text = Component.literal("NO SIGNAL");
+        final float scale = 3.0F;
+        final int textWidth = font.width(text);
+        final PoseStack pose = graphics.pose();
+        pose.pushPose();
+        pose.translate(width / 2.0F, height / 2.0F, 0.0F);
+        pose.scale(scale, scale, 1.0F);
+        graphics.drawString(font, text, -textWidth / 2, -font.lineHeight / 2, 0xFFFFFFFF, true);
+        pose.popPose();
+    }
+
+    private static void renderSignalLostNoise(final GuiGraphics graphics, final Minecraft minecraft,
+                                              final int width, final int height) {
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        if (signalLostNoiseTexture == null || signalLostNoiseWidth != width || signalLostNoiseHeight != height) {
+            if (signalLostNoiseTexture != null) {
+                minecraft.getTextureManager().release(SIGNAL_LOST_NOISE_ID);
+            }
+            signalLostNoiseWidth = width;
+            signalLostNoiseHeight = height;
+            signalLostNoiseTexture = new DynamicTexture(signalLostNoiseWidth, signalLostNoiseHeight, true);
+            minecraft.getTextureManager().register(SIGNAL_LOST_NOISE_ID, signalLostNoiseTexture);
+        }
+
+        final var image = signalLostNoiseTexture.getPixels();
+        if (image != null) {
+            long seed = (minecraft.level != null ? minecraft.level.getGameTime() : System.currentTimeMillis() / 50L)
+                * 341873128712L ^ 132897987541L;
+            for (int y = 0; y < signalLostNoiseHeight; y++) {
+                for (int x = 0; x < signalLostNoiseWidth; x++) {
+                    seed ^= (seed << 13);
+                    seed ^= (seed >> 7);
+                    seed ^= (seed << 17);
+                    final int grey = (int) (seed & 0xFFL);
+                    image.setPixel(x, y, 0xFF000000 | (grey << 16) | (grey << 8) | grey);
+                }
+            }
+            signalLostNoiseTexture.upload();
+        }
+
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        graphics.blit(RenderType::guiTextured, SIGNAL_LOST_NOISE_ID, 0, 0, 0.0F, 0.0F, width, height,
+            signalLostNoiseWidth, signalLostNoiseHeight, ARGB.white(1.0F));
+        RenderSystem.disableBlend();
     }
 
     private static final class EngineAudioController {
@@ -854,6 +1020,11 @@ public final class ShahedClientHandler {
     public static void onRenderGui(final GuiGraphics graphics) {
         final Minecraft minecraft = Minecraft.getInstance();
         if (minecraft == null || minecraft.player == null || minecraft.level == null) {
+            return;
+        }
+        // Post-detonation static outlives the (already closed) monitor screen, so it is drawn regardless of it.
+        if (signalLostGraceTicks >= 0) {
+            drawSignalLostStatic(graphics, minecraft);
             return;
         }
         if (minecraft.screen != null) {

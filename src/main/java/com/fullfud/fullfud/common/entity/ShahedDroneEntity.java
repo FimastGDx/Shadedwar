@@ -2,6 +2,7 @@ package com.fullfud.fullfud.common.entity;
 
 import com.fullfud.fullfud.common.entity.drone.DroneServiceBay;
 import com.fullfud.fullfud.common.entity.drone.WarheadCharge;
+import com.fullfud.fullfud.common.item.FpvConfiguratorItem;
 import com.fullfud.fullfud.common.item.MonitorItem;
 import com.fullfud.fullfud.common.item.ScrewdriverItem;
 import com.fullfud.fullfud.common.menu.DroneServiceMenu;
@@ -21,6 +22,7 @@ import com.fullfud.fullfud.core.ChunkLoadManager;
 import com.fullfud.fullfud.core.config.FullfudServerConfig;
 import com.fullfud.fullfud.core.network.packet.DroneAudioLoopPacket;
 import com.fullfud.fullfud.core.network.packet.DroneAudioOneShotPacket;
+import com.fullfud.fullfud.core.network.packet.OpenShahedAutopilotPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedControlPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedGhostUpdatePacket;
 import com.fullfud.fullfud.core.network.packet.ShahedLinkPacket;
@@ -105,6 +107,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private static final EntityDataAccessor<Float> DATA_ROLL = SynchedEntityData.defineId(ShahedDroneEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DATA_SERVER_YAW = SynchedEntityData.defineId(ShahedDroneEntity.class, EntityDataSerializers.FLOAT);
     private static final EntityDataAccessor<Float> DATA_SERVER_PITCH = SynchedEntityData.defineId(ShahedDroneEntity.class, EntityDataSerializers.FLOAT);
+    private static final EntityDataAccessor<Boolean> DATA_AUTO_MODE = SynchedEntityData.defineId(ShahedDroneEntity.class, EntityDataSerializers.BOOLEAN);
 
     private static final String TAG_THRUST = "Thrust";
     private static final String TAG_MOTION = "Motion";
@@ -137,6 +140,15 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private static final String TAG_SESS_GM = "SessGM";
     private static final String TAG_CONTROLLER = "ControllerUUID";
     private static final String TAG_KEEP_CHUNKS = "KeepChunks";
+
+    private static final String TAG_AUTO_ENABLED = "AutoEnabled";
+    private static final String TAG_AUTO_TX = "AutoTargetX";
+    private static final String TAG_AUTO_TY = "AutoTargetY";
+    private static final String TAG_AUTO_TZ = "AutoTargetZ";
+    private static final String TAG_AUTO_ALT = "AutoCruiseAlt";
+    private static final String TAG_AUTO_POWER = "AutoPower";
+    /** Flight-path structure: {@code false} = straight-line default, {@code true} = rectangular X-then-Z dogleg. */
+    private static final String TAG_AUTO_RECT = "AutoRectangular";
 
     private static final int STATUS_INTERVAL = 1;
     private static final int GHOST_BROADCAST_INTERVAL_TICKS = 2;
@@ -195,6 +207,51 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
      * blocks a second, against a cruise of roughly thirty-six.
      */
     private static final double WEDGE_STALL_EPS_SQR = 0.01D;
+    /**
+     * How long an armed, airborne airframe may make no headway before it is written off and detonated —
+     * regardless of why. {@link #isWedgedInTerrain} only fires when the hull is provably touching a block
+     * collision, but a drone frozen a hair short of an obstacle whose chunk has not finished loading is held
+     * at {@link Vec3#ZERO} by {@link #isFlightPathTerrainReady} with nothing under it to touch, so that check
+     * never trips and the airframe hangs in the air forever. Two seconds of going nowhere is long enough to
+     * ride out any legitimate chunk-load hold yet still end that hang. Uses the same per-tick travel epsilon
+     * as the wedge check ({@link #WEDGE_STALL_EPS_SQR}).
+     */
+    private static final int STUCK_DETONATE_TICKS = 40;
+
+    // --- Autopilot tuning (server-side). These feed the same input fields the pilot's packets write, so
+    // the flight model is unchanged; the autopilot is only a controller that chooses stick positions. ---
+    /**
+     * How far ahead the guidance aims, in seconds: both laws are fed the error minus the rate already in hand
+     * times this lead, so the stick is sized for where the airframe will be by the time the command has taken
+     * effect rather than for where it is now. It is a little more than the time the airframe needs to take a
+     * command back out again — a full bank rolls off through {@link #MAX_ROLL_RATE} at the default attitude gain
+     * in 0.7-0.8s — because the turn keeps building while the wings are still rolling in, which the bare rate
+     * term cannot see.
+     *
+     * <p>Without it the autopilot holds the stick until the heading is dead ahead, and the bank it cannot undo
+     * instantly carries the nose tens of degrees past the bearing; it then chases that overshoot back the other
+     * way and never settles. Tuned against the flight model below: at the default attitude gain this arrives on
+     * the bearing with no overshoot at all, and stays clean from about 1 to 2.5 on the gain. Larger is calmer
+     * and turns in more slowly, smaller is crisper and overshoots.
+     */
+    private static final double AUTO_TURN_LEAD_SECONDS = 0.55D;
+    /** Proportional pitch per block of cruise-altitude error. Saturates at ~20 blocks off. */
+    private static final double AUTO_K_PITCH = 0.05D;
+    /** Horizontal distance to the target at which the terminal dive may begin. */
+    private static final double AUTO_DIVE_RANGE = 120.0D;
+    /** Minimum height above the target needed to commit to a dive; below this the drone overflies and climbs. */
+    private static final double AUTO_MIN_DIVE_HEIGHT = 18.0D;
+    /** Throttle floor during the terminal dive, so the drone drives into the target rather than gliding short. */
+    private static final float AUTO_DIVE_THRUST = 0.85F;
+    /** Heading error is chased at full authority beyond this range and tapered inside it, so the drone spirals
+     *  onto the target instead of circling the point at a fixed bank. */
+    private static final double AUTO_BANK_TAPER_RANGE = 70.0D;
+    /** Proximity-fuze radius: the autopilot detonates once its flight path passes this close to the aim point. */
+    private static final double AUTO_FUSE_RADIUS = 3.0D;
+    /** Minimum nose-down command once the terminal dive is committed, so it plants rather than levelling off. */
+    private static final float AUTO_TERMINAL_PITCH = 0.6F;
+    /** Rectangular path: how close the airframe's X must get to the target's X before the run-in along Z begins. */
+    private static final double AUTO_WAYPOINT_ALIGN_TOLERANCE = 8.0D;
     private static final EntityDimensions SHAHEED_DIMENSIONS = EntityDimensions.scalable(3.0F, 1.0F);
     private final Map<UUID, Integer> viewerDistances = new HashMap<>();
     private float controlForward;
@@ -212,6 +269,8 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private int controlTimeout;
     private int menuGraceTicks;
     private int wedgedTicks;
+    /** Consecutive armed, airborne ticks with no meaningful travel — see {@link #isHungInFlight}. */
+    private int stuckTicks;
     /** Set on any tick the flight was held for terrain that had not loaded — see {@link #isWedgedInTerrain}. */
     private boolean terrainStalled;
     private double rollRate;
@@ -231,6 +290,31 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
     private ControlSession controlSession;
     // Optional mode: keep drone chunks loaded even without a controlling player.
     private boolean keepChunksLoadedWithoutPlayer;
+
+    // --- Autopilot state (server-authoritative; persisted). Configured via the FPV configurator item. ---
+    private boolean autopilotEnabled;
+    private double autoTargetX;
+    private double autoTargetY;
+    private double autoTargetZ;
+    private double autoCruiseAltitude = 120.0D;
+    private float autoPower = 0.8F;
+    /** Flight-path structure. {@code false}: fly straight at the target. {@code true}: rectangular dogleg — first
+     *  match the target's X coordinate, then run in along Z. See {@link #updateAutopilot}. */
+    private boolean autoRectangular;
+    /** Rectangular-path latch: set once the X leg is complete so the Z run-in is not abandoned if X drifts. */
+    private boolean rectangularOnZLeg;
+    /** Latched once the terminal dive begins, so the dive is not aborted as the drone drops below the dive gate. */
+    private boolean autopilotDiving;
+    /** {@code bodyYaw} at the previous autopilot tick, and the tick it was taken on, for {@link #autoYawRateDegPerSec}. */
+    private double autoLastYaw;
+    private int autoLastYawTick = Integer.MIN_VALUE;
+    /**
+     * Heading rate across the last autopilot tick, in degrees a second — the anticipation term of the bank
+     * guidance. Reported as zero whenever the previous tick did not run the autopilot (a jam, the launcher, the
+     * autopilot switched off), because differencing across that dead time would report a turn that never happened
+     * and the guidance would then fight a phantom.
+     */
+    private double autoYawRateDegPerSec;
 
     private boolean lastEngineActiveAudio;
     private float lastThrustAudio;
@@ -315,6 +399,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         builder.define(DATA_ROLL, 0.0F);
         builder.define(DATA_SERVER_YAW, getYRot());
         builder.define(DATA_SERVER_PITCH, getXRot());
+        builder.define(DATA_AUTO_MODE, false);
     }
 
     @Override
@@ -323,6 +408,7 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
 
         if (!level().isClientSide()) {
             updateJammerState();
+            entityData.set(DATA_AUTO_MODE, autopilotEnabled && !isOnLauncher());
             // Only before arming: topping the tank up mid-flight would be free range.
             if (!armed) {
                 installFuelFromBay();
@@ -345,13 +431,14 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         }
 
         if (!level().isClientSide() || isControlledByLocalInstance()) {
-            if (!level().isClientSide() && controllingPlayer == null) {
+            if (!level().isClientSide() && controllingPlayer == null && !autopilotEnabled) {
                 bodyPitch = bodyPitch * 0.9f;
                 bodyRoll = bodyRoll * 0.9f;
             }
             this.setXRot((float) bodyPitch);
             updateControlTimeout();
             if (!level().isClientSide()) {
+                updateAutopilot();
                 lastFlightStart = position();
             }
             updateFlight();
@@ -378,12 +465,24 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
             updateLaunchState();
             final ServerPlayer cp = getControllingPlayer();
             if (armed) {
+                // Proximity fuze for the autopilot: reaching the aim point detonates even if the terrain-impact
+                // and wedge checks miss it (a steep dive can drive the airframe into blocks in a way that leaves
+                // it bobbing inside them instead of tripping either check). Tested against this tick's travel
+                // segment so the ~3.6 block/tick terminal dive cannot tunnel straight past the point.
+                if (autopilotEnabled && autopilotReachedTarget()) {
+                    detonate(position());
+                    return;
+                }
                 final Vec3 blockImpact = resolveBlockImpactOrigin();
                 if (blockImpact != null) {
                     detonate(blockImpact);
                     return;
                 }
                 if (isWedgedInTerrain()) {
+                    detonate(position());
+                    return;
+                }
+                if (isHungInFlight()) {
                     detonate(position());
                     return;
                 }
@@ -602,6 +701,255 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         if (menuGraceTicks > 0) {
             menuGraceTicks--;
         }
+    }
+
+    /**
+     * Server-side autopilot. Runs after {@link #updateControlTimeout()} and before {@link #updateFlight()},
+     * writing the same input fields ({@code controlStrafe}, {@code controlForward}, {@link #setThrust}) the
+     * pilot's packets would, so the flight model is untouched — this only chooses stick positions.
+     *
+     * <p>Behaviours that fall out of the model rather than being coded here:
+     * <ul>
+     *   <li><b>Jammed</b> — when {@link #canReceiveControl()} is false the method returns without touching
+     *       anything or refreshing {@code controlTimeout}; {@link #updateControlTimeout()} then neutralises the
+     *       sticks and the hard jam has already forced thrust to zero, so the airframe coasts on its last heading.
+     *   <li><b>Fuel out</b> — {@link #updateFlight()} zeroes thrust force at empty tank regardless of the
+     *       commanded throttle, so the drone keeps steering toward the target while it glides down.
+     *   <li><b>Descent</b> — the drone does not hold altitude and then try to dive straight down (its pitch is
+     *       limited, so that just circles the point). While it still has height to lose it points the nose down
+     *       the line of sight to the target — the same thing holding W does — as steep as the airframe allows, so
+     *       it keeps descending the whole run in (spiralling down if the target is steeper than it can point) and
+     *       commits to a firm nose-down once inside {@link #AUTO_DIVE_RANGE} and {@link #AUTO_MIN_DIVE_HEIGHT}.
+     *   <li><b>Anticipation</b> — the bank and the climb commands are aimed at where the rates already in hand
+     *       will carry the airframe {@link #AUTO_TURN_LEAD_SECONDS} from now rather than at this tick's error, so
+     *       the sticks come back to neutral while it is still swinging and it settles onto the bearing instead of
+     *       oscillating around it.
+     * </ul>
+     */
+    private void updateAutopilot() {
+        if (!autopilotEnabled || isOnLauncher()) {
+            autopilotDiving = false;
+            rectangularOnZLeg = false;
+            return;
+        }
+        // Hard jam: issue no commands. The sticks decay to neutral and thrust is already forced to zero.
+        if (!canReceiveControl()) {
+            return;
+        }
+        sampleAutoTurnRate();
+
+        // Choose the point we are steering at this tick. In the default structure that is always the target.
+        // In the rectangular structure the approach is an axis-aligned dogleg: first fly to the target's X while
+        // holding the current Z (so the leg runs purely along X), and only once X is matched turn to run in along
+        // Z to the real target. The X-leg waypoint keeps the drone at its current Z, so bearing points along X.
+        double aimX = autoTargetX;
+        double aimZ = autoTargetZ;
+        boolean finalLeg = true;
+        if (autoRectangular) {
+            if (!rectangularOnZLeg && Math.abs(autoTargetX - getX()) <= AUTO_WAYPOINT_ALIGN_TOLERANCE) {
+                rectangularOnZLeg = true;
+            }
+            if (!rectangularOnZLeg) {
+                aimX = autoTargetX;
+                aimZ = getZ();
+                finalLeg = false;
+            }
+        }
+
+        final double dx = aimX - getX();
+        final double dz = aimZ - getZ();
+        final double horizDist = Math.sqrt(dx * dx + dz * dz);
+        final double heightAboveTarget = getY() - autoTargetY;
+        final double maxPitch = Math.max(1.0D, FullfudServerConfig.SERVER.shahedMaxPitchDegrees.get());
+
+        // Bank toward the bearing to the aim point. MC forward for a yaw is (-sin(yaw), cos(yaw)), so bearing = atan2(-dx, dz).
+        // Taper the bank as we close in so the terminal pass spirals onto the point instead of orbiting it.
+        final double bearing = Math.toDegrees(Math.atan2(-dx, dz));
+        final double headingError = Mth.wrapDegrees(bearing - bodyYaw);
+        final double bankAuthority = Mth.clamp(horizDist / AUTO_BANK_TAPER_RANGE, 0.2D, 1.0D);
+        // Aim the bank at where the turn will stop rather than at where the bearing is now: the command is the bank
+        // needed to fly off the stopping error — what is left of the heading error once the turn already in hand,
+        // rate times lead, has been spent — over that same lead. At full authority this saturates some 33° off the
+        // bearing rather than the 20° of the old gain, so a long turn still goes to full bank, but the last 30-odd
+        // degrees are flown with the wings already coming level instead of held over.
+        final double turnAuthority = autoTurnAuthorityDegPerSec();
+        final double stoppingError = headingError - autoYawRateDegPerSec * AUTO_TURN_LEAD_SECONDS;
+        controlStrafe = (float) Mth.clamp(
+            stoppingError / (turnAuthority * AUTO_TURN_LEAD_SECONDS) * bankAuthority, -1.0D, 1.0D);
+
+        // Vertical guidance. The old proportional "aim for a sloped altitude" controller produced only weak
+        // nose-down commands and levelled off right over the target, so the drone held height and orbited. This
+        // is the pilot's own tactic instead: while there is still altitude to lose, point the nose straight down
+        // the line of sight to the target — exactly what holding W does — capped by the airframe's pitch limit.
+        // Because the command tracks the real depression angle it grows as the range closes and never levels off,
+        // so the drone keeps descending the whole way in (and spirals down if the target is steeper than it can
+        // point). Only when below cruise and still far does it climb, to gain range and clear terrain on the way.
+        // On a rectangular X-leg the target is off to the side, so hold cruise and never dive until the Z run-in.
+        final double climbMargin = 2.0D;
+        final double distToTargetForDive = finalLeg ? horizDist : Double.MAX_VALUE;
+        if (finalLeg && heightAboveTarget <= 0.5D) {
+            // At or below the target's level: hold wings-level pitch and let the horizontal guidance finish it.
+            controlForward = 0.0F;
+        } else if (!finalLeg || (horizDist > AUTO_DIVE_RANGE && getY() < autoCruiseAltitude - climbMargin)) {
+            // Transit toward cruise altitude (negative controlForward = nose up). The X-leg always transits here.
+            // Same anticipation as the bank: the climb already under way is worth its rate times the lead in
+            // altitude, so the nose comes up early enough to arrive at cruise instead of porpoising through it.
+            final double climbError = autoCruiseAltitude - getY() - linearVelocity.y * AUTO_TURN_LEAD_SECONDS;
+            controlForward = (float) -Mth.clamp(climbError * AUTO_K_PITCH, -1.0D, 1.0D);
+        } else {
+            // Dive: nose down along the line of sight to the impact point, as steep as the airframe allows.
+            final double losDepressionDeg = Math.toDegrees(Math.atan2(heightAboveTarget, Math.max(1.0D, horizDist)));
+            controlForward = (float) Mth.clamp(losDepressionDeg / maxPitch, 0.0D, 1.0D);
+        }
+
+        final boolean terminal = finalLeg && distToTargetForDive <= AUTO_DIVE_RANGE && heightAboveTarget >= AUTO_MIN_DIVE_HEIGHT;
+        autopilotDiving = terminal;
+        if (terminal) {
+            // Commit: firm nose-down and full thrust so it drives into the target rather than levelling off.
+            controlForward = (float) Math.max(controlForward, AUTO_TERMINAL_PITCH);
+            setThrust(Math.max(autoPower, AUTO_DIVE_THRUST));
+        } else {
+            setThrust(autoPower);
+        }
+
+        // Keep the inputs alive so updateControlTimeout does not zero them next tick.
+        controlTimeout = CONTROL_TIMEOUT_TICKS;
+    }
+
+    /** Reads the synched autopilot flag; valid on both sides, so the monitor HUD can show {@code AUTO_MODE}. */
+    public boolean isAutoModeActive() {
+        return this.entityData.get(DATA_AUTO_MODE);
+    }
+
+    /**
+     * Measures how fast the airframe is actually swinging, in degrees a second, for the guidance's anticipation
+     * term. Sampled across exactly one tick so it is a real rate; any other spacing means the autopilot did not run
+     * last tick, and differencing over that gap would report the average turn over it rather than the rate the
+     * airframe carries now, so the rate is reported as zero instead.
+     */
+    private void sampleAutoTurnRate() {
+        if (this.tickCount == autoLastYawTick + 1) {
+            autoYawRateDegPerSec = Mth.wrapDegrees(bodyYaw - autoLastYaw) / TICK_SECONDS;
+        } else {
+            autoYawRateDegPerSec = 0.0D;
+        }
+        autoLastYaw = bodyYaw;
+        autoLastYawTick = this.tickCount;
+    }
+
+    /**
+     * Heading change in degrees a second this airframe gets at full bank: {@code shahedDirectTurnDegreesPerSecond}
+     * in the direct model, the cap on the coordinated rate otherwise. Guidance divides the stick by it to speak in
+     * bank fractions, which is what {@link #integrateAttitudeBanked} reads, and to convert a heading error into the
+     * seconds of turn it is worth.
+     */
+    private double autoTurnAuthorityDegPerSec() {
+        final double configured = FullfudServerConfig.SERVER.shahedDirectTurn.get()
+            ? FullfudServerConfig.SERVER.shahedDirectTurnDegreesPerSecond.get()
+            : FullfudServerConfig.SERVER.shahedMaxTurnRateDegreesPerSecond.get();
+        return Math.max(1.0D, configured);
+    }
+
+    /**
+     * Whether this tick's flight brought the airframe within {@link #AUTO_FUSE_RADIUS} of the autopilot's aim
+     * point. Measured against the travel segment rather than the end position, because the terminal dive covers
+     * several blocks a tick and a point check would step straight over the target.
+     */
+    private boolean autopilotReachedTarget() {
+        final Vec3 target = new Vec3(autoTargetX, autoTargetY, autoTargetZ);
+        final Vec3 from = lastFlightStart != null ? lastFlightStart : position();
+        final double closestSqr = distancePointToSegmentSqr(target, from, position());
+        return closestSqr <= AUTO_FUSE_RADIUS * AUTO_FUSE_RADIUS;
+    }
+
+    private static double distancePointToSegmentSqr(final Vec3 point, final Vec3 a, final Vec3 b) {
+        final Vec3 ab = b.subtract(a);
+        final double lengthSqr = ab.lengthSqr();
+        if (lengthSqr < 1.0E-9D) {
+            return point.distanceToSqr(a);
+        }
+        final double t = Mth.clamp(point.subtract(a).dot(ab) / lengthSqr, 0.0D, 1.0D);
+        return point.distanceToSqr(a.add(ab.scale(t)));
+    }
+
+    /** Snapshot of the autopilot settings, sent to the configurator screen so it opens on the current values. */
+    public CompoundTag saveAutopilotTag() {
+        final CompoundTag tag = new CompoundTag();
+        tag.putBoolean(TAG_AUTO_ENABLED, autopilotEnabled);
+        tag.putDouble(TAG_AUTO_TX, autoTargetX);
+        tag.putDouble(TAG_AUTO_TY, autoTargetY);
+        tag.putDouble(TAG_AUTO_TZ, autoTargetZ);
+        tag.putDouble(TAG_AUTO_ALT, autoCruiseAltitude);
+        tag.putFloat(TAG_AUTO_POWER, autoPower);
+        tag.putBoolean(TAG_AUTO_RECT, autoRectangular);
+        return tag;
+    }
+
+    /**
+     * Whether {@code player} may write autopilot settings: owner-gated, and refused once armed so an
+     * in-flight airframe cannot be re-tasked. The server calls this before {@link #applyAutopilotTag}.
+     */
+    public boolean canConfigureAutopilot(final ServerPlayer player) {
+        if (player == null || armed) {
+            return false;
+        }
+        return ownerUUID == null || ownerUUID.equals(player.getUUID());
+    }
+
+    /** Applies settings from the configurator screen. Missing keys leave the current value untouched. */
+    public void applyAutopilotTag(final CompoundTag tag) {
+        if (tag == null) {
+            return;
+        }
+        if (tag.contains(TAG_AUTO_ENABLED)) {
+            autopilotEnabled = tag.getBoolean(TAG_AUTO_ENABLED);
+        }
+        if (tag.contains(TAG_AUTO_TX)) {
+            autoTargetX = tag.getDouble(TAG_AUTO_TX);
+        }
+        if (tag.contains(TAG_AUTO_TY)) {
+            autoTargetY = tag.getDouble(TAG_AUTO_TY);
+        }
+        if (tag.contains(TAG_AUTO_TZ)) {
+            autoTargetZ = tag.getDouble(TAG_AUTO_TZ);
+        }
+        if (tag.contains(TAG_AUTO_ALT)) {
+            autoCruiseAltitude = tag.getDouble(TAG_AUTO_ALT);
+        }
+        if (tag.contains(TAG_AUTO_POWER)) {
+            autoPower = Mth.clamp(tag.getFloat(TAG_AUTO_POWER), 0.0F, 1.0F);
+        }
+        if (tag.contains(TAG_AUTO_RECT)) {
+            autoRectangular = tag.getBoolean(TAG_AUTO_RECT);
+        }
+        // Re-arm the dive latch: changed settings mean a fresh approach.
+        autopilotDiving = false;
+        rectangularOnZLeg = false;
+    }
+
+    /**
+     * In-flight autopilot toggle from the pilot's V key. Gated exactly like {@link #applyControl}: the sender
+     * must be the controlling pilot with this drone's monitor open. Unlike {@link #canConfigureAutopilot} it is
+     * permitted while armed — that is the whole point, to hand a flying airframe over to (or take it back from)
+     * the autopilot. Flipping the flag resets the dive/rectangular latches so the new mode starts a clean run.
+     */
+    public void toggleAutopilot(final ServerPlayer sender) {
+        if (sender == null || controllingPlayer == null || !controllingPlayer.equals(sender.getUUID())) {
+            return;
+        }
+        if (!isRemoteStateValidFor(sender)) {
+            return;
+        }
+        if (!(sender.containerMenu instanceof ShahedMonitorMenu menu)
+            || menu.getDroneId() == null
+            || !menu.getDroneId().equals(this.getUUID())) {
+            return;
+        }
+        autopilotEnabled = !autopilotEnabled;
+        autopilotDiving = false;
+        rectangularOnZLeg = false;
+        // Keep the control channel warm so the switch to manual does not immediately time the sticks out.
+        controlTimeout = CONTROL_TIMEOUT_TICKS;
     }
 
     private void updateFlight() {
@@ -1113,6 +1461,20 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         }
         keepChunksLoadedWithoutPlayer = tag.getBoolean(TAG_KEEP_CHUNKS);
 
+        this.autopilotEnabled = tag.getBoolean(TAG_AUTO_ENABLED);
+        this.autoTargetX = tag.getDouble(TAG_AUTO_TX);
+        this.autoTargetY = tag.getDouble(TAG_AUTO_TY);
+        this.autoTargetZ = tag.getDouble(TAG_AUTO_TZ);
+        if (tag.contains(TAG_AUTO_ALT)) {
+            this.autoCruiseAltitude = tag.getDouble(TAG_AUTO_ALT);
+        }
+        if (tag.contains(TAG_AUTO_POWER)) {
+            this.autoPower = Mth.clamp(tag.getFloat(TAG_AUTO_POWER), 0.0F, 1.0F);
+        }
+        this.autoRectangular = tag.getBoolean(TAG_AUTO_RECT);
+        this.autopilotDiving = false;
+        this.rectangularOnZLeg = false;
+
         updateBoundingBox();
     }
 
@@ -1162,6 +1524,14 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
             tag.putInt(TAG_SESS_GM, controlSession.originalGameType.getId());
         }
         tag.putBoolean(TAG_KEEP_CHUNKS, keepChunksLoadedWithoutPlayer);
+
+        tag.putBoolean(TAG_AUTO_ENABLED, autopilotEnabled);
+        tag.putDouble(TAG_AUTO_TX, autoTargetX);
+        tag.putDouble(TAG_AUTO_TY, autoTargetY);
+        tag.putDouble(TAG_AUTO_TZ, autoTargetZ);
+        tag.putDouble(TAG_AUTO_ALT, autoCruiseAltitude);
+        tag.putFloat(TAG_AUTO_POWER, autoPower);
+        tag.putBoolean(TAG_AUTO_RECT, autoRectangular);
     }
 
     @Override
@@ -1190,6 +1560,20 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
                 MonitorItem.setLinkedDrone(heldItem, this.getUUID());
                 FullfudNetwork.sendToPlayer(serverPlayer, new ShahedLinkPacket(this.getUUID(), true));
                 player.displayClientMessage(Component.translatable("message.fullfud.monitor.linked"), true);
+            }
+            return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
+        }
+        if (heldItem.getItem() instanceof FpvConfiguratorItem) {
+            if (!level().isClientSide && player instanceof ServerPlayer serverPlayer) {
+                if (armed) {
+                    player.displayClientMessage(Component.translatable("message.fullfud.shahed.armed"), true);
+                    return InteractionResult.FAIL;
+                }
+                if (ownerUUID != null && !ownerUUID.equals(serverPlayer.getUUID())) {
+                    player.displayClientMessage(Component.translatable("message.fullfud.monitor.in_use"), true);
+                    return InteractionResult.FAIL;
+                }
+                FullfudNetwork.sendToPlayer(serverPlayer, new OpenShahedAutopilotPacket(this.getUUID(), saveAutopilotTag()));
             }
             return level().isClientSide ? InteractionResult.SUCCESS : InteractionResult.CONSUME;
         }
@@ -1245,6 +1629,10 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
             inputMousePitchDelta = 0.0F;
             inputMouseRollDelta = 0.0F;
             releaseCameraFor(sender);
+            return;
+        }
+        if (autopilotEnabled) {
+            // Autopilot owns the sticks: the pilot may watch and release (handled above) but not steer.
             return;
         }
         if (!Float.isFinite(packet.forward())
@@ -2001,6 +2389,25 @@ public class ShahedDroneEntity extends Entity implements GeoEntity {
         }
         wedgedTicks = 0;
         return false;
+    }
+
+    /**
+     * Catch-all for an armed airframe that has simply stopped making headway, whatever the cause: frozen at
+     * {@link Vec3#ZERO} short of an obstacle in an unloaded chunk, or creeping against a wall too slowly for
+     * {@link #hasDangerousSpeed} while not overlapping any collision for {@link #isWedgedInTerrain}. A
+     * fixed-wing Shahed that is not moving forward is a wreck, so once it has gone nowhere for
+     * {@link #STUCK_DETONATE_TICKS} ticks it detonates in place.
+     */
+    private boolean isHungInFlight() {
+        if (isOnLauncher() || noPhysics) {
+            stuckTicks = 0;
+            return false;
+        }
+        if (lastFlightStart != null && lastFlightStart.distanceToSqr(position()) > WEDGE_STALL_EPS_SQR) {
+            stuckTicks = 0;
+            return false;
+        }
+        return ++stuckTicks >= STUCK_DETONATE_TICKS;
     }
 
     private void detonate() {

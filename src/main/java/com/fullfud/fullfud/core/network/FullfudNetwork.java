@@ -11,10 +11,13 @@ import com.fullfud.fullfud.core.network.packet.FpvControlPacket;
 import com.fullfud.fullfud.core.network.packet.FpvDetonatePacket;
 import com.fullfud.fullfud.core.network.packet.FpvReleasePacket;
 import com.fullfud.fullfud.core.network.packet.OpenFpvConfiguratorPacket;
+import com.fullfud.fullfud.core.network.packet.OpenShahedAutopilotPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedControlPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedGhostUpdatePacket;
 import com.fullfud.fullfud.core.network.packet.ShahedLinkPacket;
 import com.fullfud.fullfud.core.network.packet.ShahedStatusPacket;
+import com.fullfud.fullfud.core.network.packet.SetShahedAutopilotPacket;
+import com.fullfud.fullfud.core.network.packet.ToggleShahedAutopilotPacket;
 import com.fullfud.fullfud.core.network.packet.UpdateFpvDroneConfigPacket;
 import net.fabricmc.fabric.api.networking.v1.PayloadTypeRegistry;
 import net.fabricmc.fabric.api.networking.v1.ServerPlayNetworking;
@@ -67,11 +70,14 @@ public final class FullfudNetwork {
         PayloadTypeRegistry.playC2S().register(FpvReleasePacket.TYPE, FpvReleasePacket.STREAM_CODEC);
         PayloadTypeRegistry.playC2S().register(FpvDetonatePacket.TYPE, FpvDetonatePacket.STREAM_CODEC);
         PayloadTypeRegistry.playC2S().register(UpdateFpvDroneConfigPacket.TYPE, UpdateFpvDroneConfigPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(SetShahedAutopilotPacket.TYPE, SetShahedAutopilotPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playC2S().register(ToggleShahedAutopilotPacket.TYPE, ToggleShahedAutopilotPacket.STREAM_CODEC);
 
         PayloadTypeRegistry.playS2C().register(ShahedStatusPacket.TYPE, ShahedStatusPacket.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(ShahedGhostUpdatePacket.TYPE, ShahedGhostUpdatePacket.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(ShahedLinkPacket.TYPE, ShahedLinkPacket.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(OpenFpvConfiguratorPacket.TYPE, OpenFpvConfiguratorPacket.STREAM_CODEC);
+        PayloadTypeRegistry.playS2C().register(OpenShahedAutopilotPacket.TYPE, OpenShahedAutopilotPacket.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(DroneAudioLoopPacket.TYPE, DroneAudioLoopPacket.STREAM_CODEC);
         PayloadTypeRegistry.playS2C().register(DroneAudioOneShotPacket.TYPE, DroneAudioOneShotPacket.STREAM_CODEC);
 
@@ -87,6 +93,10 @@ public final class FullfudNetwork {
             (packet, context) -> FpvNetworkHandlers.handleDetonate(packet, context.player()));
         ServerPlayNetworking.registerGlobalReceiver(UpdateFpvDroneConfigPacket.TYPE,
             (packet, context) -> FpvNetworkHandlers.handleUpdateConfigurator(packet, context.player()));
+        ServerPlayNetworking.registerGlobalReceiver(SetShahedAutopilotPacket.TYPE,
+            (packet, context) -> ShahedNetworkHandlers.handleSetAutopilot(packet, context.player()));
+        ServerPlayNetworking.registerGlobalReceiver(ToggleShahedAutopilotPacket.TYPE,
+            (packet, context) -> ShahedNetworkHandlers.handleToggleAutopilot(packet, context.player()));
     }
 
     /** Replacement for {@code PacketDistributor.PLAYER.with(() -> player)}. */

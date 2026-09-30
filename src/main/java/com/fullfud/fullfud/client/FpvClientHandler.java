@@ -18,6 +18,7 @@ import com.fullfud.fullfud.core.network.packet.FpvReleasePacket;
 import com.mojang.logging.LogUtils;
 import com.mojang.blaze3d.platform.InputConstants;
 import com.mojang.blaze3d.resource.CrossFrameResourcePool;
+import com.mojang.blaze3d.systems.RenderSystem;
 import com.mojang.blaze3d.vertex.PoseStack;
 import com.mojang.math.Axis;
 import net.minecraft.client.KeyMapping;
@@ -28,12 +29,15 @@ import net.minecraft.client.gui.Font;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.PauseScreen;
 import net.minecraft.client.renderer.PostChain;
+import net.minecraft.client.renderer.RenderType;
 import net.minecraft.client.renderer.entity.ThrownItemRenderer;
+import net.minecraft.client.renderer.texture.DynamicTexture;
 import net.minecraft.network.chat.Component;
 import net.minecraft.network.chat.MutableComponent;
 import net.minecraft.network.chat.Style;
 import net.minecraft.resources.ResourceLocation;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.util.ARGB;
 import net.minecraft.util.Mth;
 import net.minecraft.world.entity.EquipmentSlot;
 import net.minecraft.world.entity.Entity;
@@ -107,6 +111,24 @@ public final class FpvClientHandler {
     private static final int AXIS_ROLL = 1;
     private static final int AXIS_YAW = 2;
     private static UUID activeDrone;
+    /**
+     * When the drone we are flying is destroyed (detonation/crash), we hold the FPV view in full static with a
+     * NO SIGNAL caption for this many ticks before returning the player to their own eyes. 60 ticks = 3 s.
+     */
+    private static final int SIGNAL_LOST_GRACE_TICKS = 60;
+    /** Countdown while painting the post-detonation static; {@code -1} when not in the grace window. */
+    private static int signalLostGraceTicks = -1;
+    /**
+     * The FPV post chain is supposed to bury the frame in static during the grace window, but a HUD-layer
+     * noise fill is drawn on top of it as well so the static is guaranteed to show even if the post effect
+     * fails to load — mirroring the Shahed monitor, whose feed is force-closed on detonation and so relies
+     * on this same technique. Regenerated per frame from an xorshift; reallocated only when the size changes.
+     */
+    private static final ResourceLocation SIGNAL_LOST_NOISE_ID =
+        ResourceLocation.fromNamespaceAndPath("fullfud", "fpv_signal_lost_noise");
+    private static DynamicTexture signalLostNoiseTexture;
+    private static int signalLostNoiseWidth = -1;
+    private static int signalLostNoiseHeight = -1;
     private static FpvDroneEntity cachedResolvedDrone;
     private static long cachedResolvedDroneGameTime = Long.MIN_VALUE;
     private static UUID cachedResolvedPlayerId;
@@ -264,6 +286,11 @@ public final class FpvClientHandler {
         if (drone != null) {
             shouldFpv = true;
             signal = drone.getSignalQuality();
+        } else if (signalLostGraceTicks >= 0) {
+            // Drone gone but still inside the grace window: keep the chain alive at zero signal so the frame
+            // stays buried in static instead of snapping back to a clean world view.
+            shouldFpv = true;
+            signal = 0.0F;
         }
 
         if (!shouldFpv) {
@@ -329,8 +356,19 @@ public final class FpvClientHandler {
         // Controller calibration: keybind and auto-show on first detect
         handleCalibration(minecraft);
 
+        // Holding the post-detonation static: the camera is already back on the player and the post chain is
+        // still painting full noise; just run out the clock, then tear the FPV state down for real.
+        if (signalLostGraceTicks >= 0) {
+            if (--signalLostGraceTicks < 0) {
+                resetState();
+            }
+            return;
+        }
+
         if (minecraft.getCameraEntity() instanceof FpvDroneEntity cameraDrone && (cameraDrone.isRemoved() || !cameraDrone.isAlive())) {
-            resetState();
+            // The drone we were flying was destroyed (detonation/crash): dissolve into static for a moment
+            // before dropping the pilot back to their own view, rather than cutting instantly.
+            beginSignalLostGrace();
             return;
         }
 
@@ -803,14 +841,26 @@ public final class FpvClientHandler {
     }
 
     private static void resetState() {
+        resetState(false);
+    }
+
+    /**
+     * Tears down the FPV session. With {@code keepFpvOverlay} the camera and control state are released but the
+     * post chain and {@link #inFpvMode} are left running — this is the signal-loss grace window, where the world
+     * is drawn from the player's eyes but still buried under static until {@link #onClientTick} finishes it.
+     */
+    private static void resetState(final boolean keepFpvOverlay) {
         final Minecraft minecraft = Minecraft.getInstance();
         final boolean shouldRestoreCamera = minecraft != null
             && (minecraft.getCameraEntity() instanceof FpvDroneEntity || activeDrone != null);
         restoreCameraType();
         restoreFov();
-        if (inFpvMode) {
+        if (inFpvMode && !keepFpvOverlay) {
             inFpvMode = false;
             releaseFpvChain();
+        }
+        if (!keepFpvOverlay) {
+            signalLostGraceTicks = -1;
         }
         stopActiveDroneAudio();
         FpvSoundHandler.clear();
@@ -834,6 +884,18 @@ public final class FpvClientHandler {
         lastResolvedCameraYaw = 0.0F;
         invalidateSmoothedCameraState();
         mouseInitialized = false;
+    }
+
+    /**
+     * Begins the post-detonation static window: releases camera and control state (keeping the post chain alive)
+     * so the world draws from the player's eyes under full noise, and starts the countdown that
+     * {@link #onClientTick} runs down before the final {@link #resetState()}.
+     */
+    private static void beginSignalLostGrace() {
+        if (signalLostGraceTicks < 0) {
+            signalLostGraceTicks = SIGNAL_LOST_GRACE_TICKS;
+        }
+        resetState(true);
     }
 
     private static void stopActiveDroneAudio() {
@@ -1318,11 +1380,19 @@ public final class FpvClientHandler {
 
     /** Called from {@code GuiMixin}, in place of the former {@code RenderGuiEvent.Post} listener. */
     public static void onRenderGui(final GuiGraphics graphics) {
+        final Minecraft minecraft = Minecraft.getInstance();
+        if (minecraft == null || minecraft.player == null) return;
+
+        // During the post-detonation static, the OSD is gone with the drone; all that remains is the caption
+        // over the noise, drawn regardless of the HUD toggle so the pilot always knows the feed dropped.
+        if (signalLostGraceTicks >= 0) {
+            drawNoSignalOverlay(graphics, minecraft);
+            return;
+        }
+
         if (!FullfudClientConfig.CLIENT.fpvHudEnabled.get()) {
             return;
         }
-        final Minecraft minecraft = Minecraft.getInstance();
-        if (minecraft == null || minecraft.player == null) return;
         final FpvDroneEntity drone = resolveActiveControlledDrone(minecraft);
         if (drone == null) return;
         if (!isFpvActive(minecraft, drone)) {
@@ -1330,6 +1400,66 @@ public final class FpvClientHandler {
         }
 
         FpvOsdHudRenderer.render(graphics, minecraft, drone, speedMs, groundSpeedKmh, distanceToPilot, throttleDisplayMax);
+    }
+
+    private static void drawNoSignalOverlay(final GuiGraphics graphics, final Minecraft minecraft) {
+        final int guiW = minecraft.getWindow().getGuiScaledWidth();
+        final int guiH = minecraft.getWindow().getGuiScaledHeight();
+        renderSignalLostNoise(graphics, minecraft, guiW, guiH);
+
+        final Font font = minecraft.font;
+        final Component text = Component.literal("NO SIGNAL");
+        final float scale = 3.0F;
+        final int textWidth = font.width(text);
+        final PoseStack pose = graphics.pose();
+        pose.pushPose();
+        pose.translate(guiW / 2.0F, guiH / 2.0F, 0.0F);
+        pose.scale(scale, scale, 1.0F);
+        graphics.drawString(font, text, -textWidth / 2, -font.lineHeight / 2, 0xFFFFFFFF, true);
+        pose.popPose();
+    }
+
+    /**
+     * Fills the screen with regenerated grey static, matching {@code ShahedClientHandler.renderSignalLostNoise}.
+     * The FPV path historically leaned on the {@code fpv_post} noise shader for this, but that only paints while
+     * the post chain is live; a HUD fill here makes the detonation static independent of the shader pipeline.
+     */
+    private static void renderSignalLostNoise(final GuiGraphics graphics, final Minecraft minecraft,
+                                              final int width, final int height) {
+        if (width <= 0 || height <= 0) {
+            return;
+        }
+        if (signalLostNoiseTexture == null || signalLostNoiseWidth != width || signalLostNoiseHeight != height) {
+            if (signalLostNoiseTexture != null) {
+                minecraft.getTextureManager().release(SIGNAL_LOST_NOISE_ID);
+            }
+            signalLostNoiseWidth = width;
+            signalLostNoiseHeight = height;
+            signalLostNoiseTexture = new DynamicTexture(signalLostNoiseWidth, signalLostNoiseHeight, true);
+            minecraft.getTextureManager().register(SIGNAL_LOST_NOISE_ID, signalLostNoiseTexture);
+        }
+
+        final var image = signalLostNoiseTexture.getPixels();
+        if (image != null) {
+            long seed = (minecraft.level != null ? minecraft.level.getGameTime() : System.currentTimeMillis() / 50L)
+                * 341873128712L ^ 132897987541L;
+            for (int y = 0; y < signalLostNoiseHeight; y++) {
+                for (int x = 0; x < signalLostNoiseWidth; x++) {
+                    seed ^= (seed << 13);
+                    seed ^= (seed >> 7);
+                    seed ^= (seed << 17);
+                    final int grey = (int) (seed & 0xFFL);
+                    image.setPixel(x, y, 0xFF000000 | (grey << 16) | (grey << 8) | grey);
+                }
+            }
+            signalLostNoiseTexture.upload();
+        }
+
+        RenderSystem.enableBlend();
+        RenderSystem.defaultBlendFunc();
+        graphics.blit(RenderType::guiTextured, SIGNAL_LOST_NOISE_ID, 0, 0, 0.0F, 0.0F, width, height,
+            signalLostNoiseWidth, signalLostNoiseHeight, ARGB.white(1.0F));
+        RenderSystem.disableBlend();
     }
 
     private static int displayedPowerPercent(final FpvDroneEntity drone) {
