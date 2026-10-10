@@ -7,21 +7,25 @@ package com.fullfud.fullfud.common.entity.drone;
  * shrapnel model runs regardless — but it leaves the terrain alone. Everything above {@code NONE}
  * switches vanilla block damage back on at the radius below.
  *
- * <p>{@code power} is the vanilla explosion radius parameter, not a TNT count. TNT is 4.0, and the
- * volume an explosion clears grows with the cube of that number, so "as much as N sticks of TNT" is
- * {@code 4 * cbrt(N)}: three sticks is 5.8, seven is 7.7, ten is 8.6. Reading the tiers as TNT counts
- * directly would have made tier 4 a 40-block crater.
+ * <p>{@code power} is the vanilla explosion radius parameter, not a TNT count; TNT itself is 4.0.
+ * The values are deliberately three times the "N sticks of TNT" readings they started as,
+ * {@code 4 * cbrt(N)} — 4.0, 5.8, 7.7, 8.6 — because a vanilla blast barely scratches anything
+ * solid. Intensity is spent at a fixed rate per 0.3 blocks of ray, so the depth an explosion cuts
+ * is proportional to {@code power} and the volume it clears to the cube: at the old numbers a tier 2
+ * charge went about a block into stone and a wall lost five or six blocks, which reads as no damage
+ * at all beside the airframe hitting it. Tripling them drives tier 2 two to three blocks into stone
+ * and takes a hole five to seven blocks across out of the wall.
  */
 public enum WarheadCharge {
     NONE(0, 0.0F, false),
-    /** Roughly one stick of TNT. */
-    TIER_1(1, 4.0F, false),
-    /** Roughly three sticks. The heaviest an FPV airframe will take. */
-    TIER_2(2, 5.8F, false),
-    /** Roughly seven sticks. */
-    TIER_3(3, 7.7F, false),
-    /** Roughly ten sticks, and it starts fires. */
-    TIER_4(4, 8.6F, true);
+    /** A stick of TNT's radius, tripled: about five blocks across and two deep in stone. */
+    TIER_1(1, 12.0F, false),
+    /** Three sticks, tripled. The heaviest an FPV airframe will take. */
+    TIER_2(2, 17.4F, false),
+    /** Seven sticks, tripled: through a wall and into the floor behind it. */
+    TIER_3(3, 23.1F, false),
+    /** Ten sticks, tripled, and it starts fires. */
+    TIER_4(4, 25.8F, true);
 
     /** The heaviest charge an FPV drone will accept; a Shahed takes any of them. */
     public static final WarheadCharge FPV_MAX = TIER_2;
